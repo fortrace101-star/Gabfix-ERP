@@ -1,0 +1,29 @@
+{
+  "name": "gabfix-server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon --watch . --ext ts --exec tsx index.ts",
+    "dev:nodemon": "nodemon --watch . --ext ts --exec tsx index.ts",
+    "start": "tsx index.ts",
+    "db:init": "tsx init-db.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "gabfix-erp": "file:..",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.5.1",
+    "@types/pg": "^8.23.1",
+    "nodemon": "^3.1.14",
+    "tsx": "^4.23.13",
+    "typescript": "^5.5.3"
+  }
+}

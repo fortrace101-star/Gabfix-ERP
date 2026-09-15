@@ -3,21 +3,8 @@ import {
   Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, BarChart3, Bell, BriefcaseBusiness, Building2, CalendarDays, Check, ChevronDown, CircleDollarSign, ClipboardList, Clock3, Download, Droplets, FileText, Filter, Gauge, LayoutDashboard, Menu, Package, Plus, Search, Settings, Sparkles, Upload, Users, Wrench, X,
 } from 'lucide-react';
 import gabfixLogo from './assets/gabfix-logo.png';
-
-type View = 'dashboard' | 'jobs' | 'customers' | 'finance' | 'laundry' | 'equipment' | 'inventory' | 'reports' | 'settings';
-type Modal = 'job' | 'customer' | 'expense' | 'service' | 'equipment' | 'job-status' | null;
-type JobStatus = 'Completed' | 'In Progress' | 'Scheduled' | 'Quoted';
-
-type Branch = { id: string; name: string; location: string };
-type Customer = { id: string; name: string; company: string; type: string; phone: string; email: string; balance: number; status: string };
-type Service = { id: string; name: string; division: string; method: string; price: number; active: boolean };
-type Job = { id: string; number: string; customerId: string; branchId: string; serviceId: string; date: string; status: JobStatus; revenue: number; cost: number; assignees: string[]; equipmentUsage?: { equipmentId: string; hours: number }[] };
-type Invoice = { id: string; number: string; customerId: string; date: string; due: string; total: number; paid: number; status: string };
-type Expense = { id: string; category: string; description: string; amount: number; branchId: string; date: string; division: string };
-type LaundryOrder = { id: string; number: string; customerId: string; status: string; total: number; paid: number; items: string; received: string };
-type Equipment = { id: string; name: string; serialNumber: string; type: string; branchId: string; value: number; bookValue: number; condition: string; nextMaintenance: string; usage: number };
-type InventoryItem = { id: string; name: string; category: string; unit: string; quantity: number; minimum: number; cost: number; branchId: string };
-type AppData = { branches: Branch[]; customers: Customer[]; services: Service[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; laundry: LaundryOrder[]; equipment: Equipment[]; inventory: InventoryItem[] };
+import * as api from './api';
+import type { AppData, Job, JobStatus, LaundryOrder, Modal, View } from './types';
 
 const money = (value: number) => new Intl.NumberFormat('en-UG', { style: 'currency', currency: 'UGX', maximumFractionDigits: 0 }).format(value).replace('USh', 'UGX');
 const today = new Date().toISOString().slice(0, 10);
@@ -46,80 +33,7 @@ const getStartDate = (period: string): string => {
   return start.toISOString().slice(0, 10);
 };
 
-const seedData: AppData = {
-  branches: [
-    { id: 'b1', name: 'Kampala Central', location: 'Plot 18, Kira Road' },
-    { id: 'b2', name: 'Ntinda Branch', location: '23 Ntinda Industrial Area' },
-  ],
-  customers: [
-    { id: 'c1', name: 'Sarah Namuli', company: '', type: 'Residential', phone: '+256 772 441 208', email: 'sarah@example.com', balance: 0, status: 'Active' },
-    { id: 'c2', name: 'ABC Offices Ltd', company: 'ABC Offices Ltd', type: 'Corporate Client', phone: '+256 701 820 445', email: 'admin@abcoffices.ug', balance: 1250000, status: 'Active' },
-    { id: 'c3', name: 'Mirembe Properties', company: 'Mirembe Properties', type: 'Property Manager', phone: '+256 759 114 801', email: 'hello@mirembe.ug', balance: 760000, status: 'Active' },
-    { id: 'c4', name: 'David Kato', company: '', type: 'Residential', phone: '+256 788 210 117', email: 'david@example.com', balance: 0, status: 'Active' },
-    { id: 'c5', name: 'Greenfield Academy', company: 'Greenfield Academy', type: 'Institution', phone: '+256 704 556 233', email: 'finance@greenfield.ug', balance: 2180000, status: 'Active' },
-    { id: 'c6', name: 'Nakasero Apartments', company: 'Nakasero Apartments', type: 'Corporate Client', phone: '+256 778 100 440', email: 'manager@nakasero.ug', balance: 0, status: 'Active' },
-    { id: 'c7', name: 'James Okello', company: '', type: 'Walk-in Customer', phone: '+256 753 993 200', email: 'james@example.com', balance: 85000, status: 'Active' },
-    { id: 'c8', name: 'Lakeside Restaurant', company: 'Lakeside Restaurant', type: 'Business', phone: '+256 700 002 341', email: 'accounts@lakeside.ug', balance: 430000, status: 'Active' },
-  ],
-  services: [
-    { id: 's1', name: 'House Cleaning', division: 'Cleaning Services', method: 'Fixed price', price: 180000, active: true },
-    { id: 's2', name: 'Deep Cleaning', division: 'Cleaning Services', method: 'Fixed price', price: 420000, active: true },
-    { id: 's3', name: 'Office Cleaning Contract', division: 'Contract Cleaning', method: 'Per visit', price: 650000, active: true },
-    { id: 's4', name: 'Car Detailing', division: 'Vehicle Services', method: 'Per vehicle', price: 220000, active: true },
-    { id: 's5', name: 'Electrical Repair', division: 'Home Solutions', method: 'Per hour', price: 120000, active: true },
-    { id: 's6', name: 'Plumbing', division: 'Home Solutions', method: 'Custom quotation', price: 250000, active: true },
-    { id: 's7', name: 'AC Cleaning', division: 'Home Solutions', method: 'Per machine', price: 150000, active: true },
-    { id: 's8', name: 'Laundry per KG', division: 'Laundry', method: 'Per kilogram', price: 5000, active: true },
-    { id: 's9', name: 'Laundry per Item', division: 'Laundry', method: 'Per item', price: 3000, active: true },
-    { id: 's10', name: 'Ironing', division: 'Laundry', method: 'Per item', price: 1000, active: true },
-    { id: 's11', name: 'Carpet Cleaning', division: 'Cleaning Services', method: 'Per square meter', price: 12000, active: true },
-    { id: 's12', name: 'Post Construction Cleaning', division: 'Cleaning Services', method: 'Custom quotation', price: 800000, active: true },
-  ],
-  jobs: [
-    { id: 'j1', number: 'JOB-00142', customerId: 'c2', branchId: 'b1', serviceId: 's3', date: '2026-09-03', status: 'In Progress', revenue: 650000, cost: 280000, assignees: ['Moses K.', 'Agnes N.'] },
-    { id: 'j2', number: 'JOB-00141', customerId: 'c1', branchId: 'b1', serviceId: 's2', date: '2026-09-03', status: 'Completed', revenue: 420000, cost: 135000, assignees: ['Sarah A.'] },
-    { id: 'j3', number: 'JOB-00140', customerId: 'c5', branchId: 'b2', serviceId: 's7', date: '2026-09-02', status: 'Scheduled', revenue: 450000, cost: 95000, assignees: ['John O.'] },
-    { id: 'j4', number: 'JOB-00139', customerId: 'c4', branchId: 'b1', serviceId: 's4', date: '2026-09-02', status: 'Completed', revenue: 220000, cost: 70000, assignees: ['Peter L.'] },
-    { id: 'j5', number: 'JOB-00138', customerId: 'c3', branchId: 'b2', serviceId: 's5', date: '2026-09-01', status: 'Completed', revenue: 540000, cost: 260000, assignees: ['David T.'] },
-    { id: 'j6', number: 'JOB-00137', customerId: 'c8', branchId: 'b1', serviceId: 's6', date: '2026-08-31', status: 'Quoted', revenue: 780000, cost: 320000, assignees: [] },
-  ],
-  invoices: [
-    { id: 'i1', number: 'INV-00098', customerId: 'c2', date: '2026-08-30', due: '2026-09-06', total: 3250000, paid: 2000000, status: 'Partially Paid' },
-    { id: 'i2', number: 'INV-00097', customerId: 'c5', date: '2026-08-18', due: '2026-09-01', total: 2180000, paid: 0, status: 'Overdue' },
-    { id: 'i3', number: 'INV-00096', customerId: 'c3', date: '2026-08-28', due: '2026-09-11', total: 1760000, paid: 1000000, status: 'Partially Paid' },
-    { id: 'i4', number: 'INV-00095', customerId: 'c1', date: '2026-08-26', due: '2026-08-30', total: 420000, paid: 420000, status: 'Paid' },
-    { id: 'i5', number: 'INV-00094', customerId: 'c4', date: '2026-08-25', due: '2026-08-25', total: 220000, paid: 220000, status: 'Paid' },
-  ],
-  expenses: [
-    { id: 'e1', category: 'Payroll', description: 'August field team payroll', amount: 4800000, branchId: 'b1', date: '2026-08-30', division: 'Company overhead' },
-    { id: 'e2', category: 'Supplies', description: 'Cleaning chemicals & PPE', amount: 1120000, branchId: 'b1', date: '2026-09-01', division: 'Cleaning Services' },
-    { id: 'e3', category: 'Fuel', description: 'Field vehicles fuel', amount: 680000, branchId: 'b2', date: '2026-09-02', division: 'Company overhead' },
-    { id: 'e4', category: 'Repairs', description: 'Washer drain pump replacement', amount: 350000, branchId: 'b2', date: '2026-08-29', division: 'Laundry' },
-    { id: 'e5', category: 'Rent', description: 'September workspace rent', amount: 1800000, branchId: 'b1', date: '2026-09-01', division: 'Company overhead' },
-    { id: 'e6', category: 'Utilities', description: 'Water and electricity', amount: 940000, branchId: 'b2', date: '2026-08-28', division: 'Laundry' },
-  ],
-  laundry: [
-    { id: 'l1', number: 'LDY-00216', customerId: 'c7', status: 'Ready', total: 85000, paid: 50000, items: '10kg wash + iron', received: '2026-09-03' },
-    { id: 'l2', number: 'LDY-00215', customerId: 'c1', status: 'Washing', total: 125000, paid: 125000, items: 'Blankets, shirts, duvet', received: '2026-09-02' },
-    { id: 'l3', number: 'LDY-00214', customerId: 'c4', status: 'Collected', total: 64000, paid: 64000, items: '16kg wash', received: '2026-09-01' },
-    { id: 'l4', number: 'LDY-00213', customerId: 'c6', status: 'Drying', total: 210000, paid: 0, items: 'Hotel linen bundle', received: '2026-09-03' },
-  ],
-  equipment: [
-    { id: 'a1', name: 'Industrial Washer WM-003', serialNumber: 'WM-2021-001', type: 'Washing machine', branchId: 'b2', value: 10000000, bookValue: 8500000, condition: 'Good', nextMaintenance: '2026-09-10', usage: 384 },
-    { id: 'a2', name: 'Commercial Dryer DR-002', serialNumber: 'DR-2022-014', type: 'Dryer', branchId: 'b2', value: 7600000, bookValue: 6200000, condition: 'Good', nextMaintenance: '2026-09-18', usage: 292 },
-    { id: 'a3', name: 'Toyota Hiace UBD 442K', serialNumber: 'UBD-442K', type: 'Vehicle', branchId: 'b1', value: 48000000, bookValue: 35600000, condition: 'Good', nextMaintenance: '2026-09-06', usage: 12840 },
-    { id: 'a4', name: 'Karcher Pressure Washer', serialNumber: 'KPW-339-X', type: 'Pressure washer', branchId: 'b1', value: 4200000, bookValue: 3400000, condition: 'Maintenance due', nextMaintenance: '2026-09-03', usage: 118 },
-    { id: 'a5', name: 'Industrial Ironing Press', serialNumber: 'IIP-880', type: 'Ironing machine', branchId: 'b2', value: 5300000, bookValue: 4900000, condition: 'Good', nextMaintenance: '2026-10-01', usage: 164 },
-  ],
-  inventory: [
-    { id: 'inv1', name: 'Laundry detergent', category: 'Laundry supplies', unit: 'kg', quantity: 18, minimum: 25, cost: 14500, branchId: 'b2' },
-    { id: 'inv2', name: 'Fabric softener', category: 'Laundry supplies', unit: 'litre', quantity: 42, minimum: 20, cost: 12000, branchId: 'b2' },
-    { id: 'inv3', name: 'Disinfectant', category: 'Cleaning supplies', unit: 'litre', quantity: 64, minimum: 30, cost: 8500, branchId: 'b1' },
-    { id: 'inv4', name: 'Microfiber cloths', category: 'Cleaning supplies', unit: 'pack', quantity: 11, minimum: 15, cost: 22000, branchId: 'b1' },
-    { id: 'inv5', name: 'Car shampoo', category: 'Detailing materials', unit: 'litre', quantity: 36, minimum: 12, cost: 18000, branchId: 'b1' },
-    { id: 'inv6', name: 'Plumbing fittings', category: 'Repair materials', unit: 'box', quantity: 8, minimum: 5, cost: 95000, branchId: 'b2' },
-  ],
-};
+const emptyData: AppData = { branches: [], customers: [], services: [], jobs: [], invoices: [], expenses: [], laundry: [], equipment: [], inventory: [] };
 
 const navGroups = [
   { label: 'Workspace', items: [{ id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }] },
@@ -131,10 +45,9 @@ const navGroups = [
 ];
 
 function App() {
-  const [data, setData] = useState<AppData>(() => {
-    const saved = localStorage.getItem('gabfix-data');
-    return saved ? JSON.parse(saved) as AppData : seedData;
-  });
+  const [data, setData] = useState<AppData>(emptyData);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [view, setView] = useState<View>('dashboard');
   const [branch, setBranch] = useState('all');
   const [period, setPeriod] = useState('This month');
@@ -143,9 +56,9 @@ function App() {
   const [modalData, setModalData] = useState<any>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [toast, setToast] = useState('');
-  const importRef = useRef<HTMLInputElement>(null);
+  const [importRef] = useState(() => ({ current: null as HTMLInputElement | null }));
 
-  useEffect(() => { localStorage.setItem('gabfix-data', JSON.stringify(data)); }, [data]);
+  useEffect(() => { let cancelled = false; (async () => { try { const remote = await api.fetchData(); if (!cancelled) setData(remote); } catch { if (!cancelled) setLoadError('Could not reach the database. Is the API server running?'); } finally { if (!cancelled) setLoading(false); } })(); return () => { cancelled = true; }; }, []);
   useEffect(() => { if (toast) { const timer = window.setTimeout(() => setToast(''), 2600); return () => window.clearTimeout(timer); } }, [toast]);
 
   const branchJobs = useMemo(() => branch === 'all' ? data.jobs : data.jobs.filter(job => job.branchId === branch), [data.jobs, branch]);
@@ -164,12 +77,15 @@ function App() {
 
   const updateData = (next: AppData) => setData(next);
   const notify = (message: string) => setToast(message);
+  const refresh = async () => { try { setData(await api.fetchData()); } catch { notify('Could not refresh data'); } };
   const exportData = () => { const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = 'gabfix-backup.json'; link.click(); URL.revokeObjectURL(url); notify('Backup downloaded'); };
-  const importData = (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { updateData(JSON.parse(String(reader.result)) as AppData); notify('Backup restored successfully'); } catch { notify('That backup could not be read'); } }; reader.readAsText(file); };
-  const resetData = () => { if (window.confirm('Restore the original Gabfix demo data?')) { updateData(seedData); notify('Demo data restored'); } };
+  const importData = (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = async () => { try { await api.importData(JSON.parse(String(reader.result)) as AppData); await refresh(); notify('Backup restored successfully'); } catch { notify('That backup could not be restored'); } }; reader.readAsText(file); };
+  const resetData = async () => { if (!window.confirm('Restore the original Gabfix demo data? This replaces everything in the database.')) return; try { await api.resetData(); await refresh(); notify('Demo data restored'); } catch { notify('Reset failed'); } };
 
   const renderView = () => {
-    const props = { data, updateData, branch, setBranch, notify, setModal, setModalData, query };
+    const props = { data, updateData, branch, setBranch, notify, setModal, setModalData, query, refresh };
+    if (loading) return <div className="empty-state"><strong>Loading your workspace…</strong><span>Fetching records from the database</span></div>;
+    if (loadError) return <div className="empty-state"><strong>Cannot reach the database</strong><span>{loadError}</span><Button onClick={refresh}>Retry</Button></div>;
     if (view === 'dashboard') return <Dashboard data={data} branch={branch} period={period} setPeriod={setPeriod} revenue={revenue} expenses={expenses} receivables={receivables} activeJobs={activeJobs} setView={setView} setModal={setModal} setModalData={setModalData} />; void activeJobs;
     if (view === 'jobs') return <JobsView {...props} />;
     if (view === 'customers') return <CustomersView {...props} />;
@@ -193,7 +109,7 @@ function App() {
       <header className="topbar"><button className="menu-trigger" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><div className="topbar-context"><strong>{view === 'dashboard' ? 'Here is your business at a glance.' : navGroups.flatMap(group => group.items).find(item => item.id === view)?.label ?? 'Settings'}</strong></div><div className="topbar-actions"><div className="global-search"><Search size={17} /><input placeholder="Search anything..." value={query} onChange={event => setQuery(event.target.value)} /><kbd>⌘ K</kbd></div><button className="icon-button notification"><Bell size={18} /><i /></button><button className="profile-button"><div className="avatar small">GN</div><ChevronDown size={14} /></button></div></header>
       <div className="page-content">{renderView()}</div>
     </main>
-    {modal && <ModalShell type={modal} data={data} updateData={updateData} close={() => { setModal(null); setModalData(null); }} notify={notify} modalData={modalData} />}
+    {modal && <ModalShell type={modal} data={data} close={() => { setModal(null); setModalData(null); }} notify={notify} modalData={modalData} refresh={refresh} />}
     <input ref={importRef} type="file" accept="application/json" onChange={importData} className="hidden-input" />
     {toast && <div className="toast"><Check size={16} />{toast}</div>}
   </div>;
@@ -223,7 +139,7 @@ function QuickAction({ icon, label, onClick }: { icon: ReactNode; label: string;
 function KpiCard({ label, value, trend, detail, icon, tone, down }: { label: string; value: string; trend: string; detail: string; icon: ReactNode; tone: string; down?: boolean }) { return <div className={`kpi-card ${tone}`}><div className="kpi-top"><span>{label}</span><div className="kpi-icon">{icon}</div></div><strong>{value}</strong><div className={`kpi-trend ${down ? 'negative' : ''}`}><span>{trend}</span><small>{detail}</small></div></div>; }
 function AlertRow({ icon, title, detail, tone, onClick }: { icon: ReactNode; title: string; detail: string; tone: string; onClick: () => void }) { return <button className="alert-row" onClick={onClick}><span className={`alert-icon ${tone}`}>{icon}</span><span><strong>{title}</strong><small>{detail}</small></span><ArrowUpRight size={15} /></button>; }
 
-function JobStatusModal({ job, data, updateData, close, notify }: { job: Job; data: AppData; updateData: (data: AppData) => void; close: () => void; notify: (message: string) => void }) {
+function JobStatusModal({ job, data, close, notify, refresh }: { job: Job; data: AppData; close: () => void; notify: (message: string) => void; refresh: () => Promise<void> }) {
   const [status, setStatus] = useState<JobStatus>(job.status);
   const [usage, setUsage] = useState<{ [key: string]: string }>(job.equipmentUsage?.reduce((acc, u) => ({ ...acc, [u.equipmentId]: String(u.hours) }), {}) || {});
 
@@ -252,9 +168,23 @@ function JobStatusModal({ job, data, updateData, close, notify }: { job: Job; da
       });
     }
 
-    updateData({ ...data, jobs: updatedJobs, equipment: updatedEquipment });
-    close();
-    notify(`Job ${job.number} updated to ${status}`);
+    // Persist both updates via the API, then refresh from the database
+    (async () => {
+      try {
+        await api.updateJob(job.id, { status, equipmentUsage: status === 'Completed' || status === 'In Progress' ? equipmentUsage : [] });
+        if (status === 'Completed') {
+          for (const entry of equipmentUsage) {
+            const machine = data.equipment.find(item => item.id === entry.equipmentId);
+            if (machine) await api.updateEquipment(entry.equipmentId, { usage: machine.usage + entry.hours });
+          }
+        }
+        await refresh();
+        notify(`Job ${job.number} updated to ${status}`);
+      } catch {
+        notify('Could not update the job');
+      }
+      close();
+    })();
   };
 
   return (
@@ -332,7 +262,7 @@ function getPaymentStatus(job: Job, data: AppData) {
   return `Partial (${money(balance)} pending)`;
 }
 
-function JobTable({ jobs, data, setModal, setModalData }: { jobs: Job[]; data: AppData; compact?: boolean; setModal?: (modal: Modal) => void; setModalData?: (data: any) => void }) { return <div className="table-wrap"><table><thead><tr><th>Job</th><th>Status</th><th>Customer</th><th>Service</th><th>Branch</th><th>Revenue</th><th>Payment Status</th>{setModal && <th>Action</th>}</tr></thead><tbody>{jobs.length ? jobs.map(job => { const customer = data.customers.find(item => item.id === job.customerId); const service = data.services.find(item => item.id === job.serviceId); const paymentStatus = getPaymentStatus(job, data); return <tr key={job.id}><td><strong className="linkish">{job.number}</strong><small>{job.date}</small></td><td><StatusBadge value={job.status} /></td><td><strong>{customer?.company || customer?.name}</strong><small>{customer?.type}</small></td><td>{service?.name}<small>{service?.division}</small></td><td>{data.branches.find(item => item.id === job.branchId)?.name.replace(' Branch', '')}</td><td><strong>{money(job.revenue)}</strong><small className="profit-text">{Math.round((job.revenue - job.cost) / job.revenue * 100)}% margin</small></td><td><StatusBadge value={paymentStatus} /></td>{setModal && <td><button className="more-button" onClick={() => { setModal('job-status'); setModalData(job); }}>Update</button></td>}</tr>; }) : <tr><td colSpan={8}><EmptyState title="No jobs match" /></td></tr>}</tbody></table></div>; }
+function JobTable({ jobs, data, setModal, setModalData }: { jobs: Job[]; data: AppData; compact?: boolean; setModal?: (modal: Modal) => void; setModalData?: (data: any) => void }) { return <div className="table-wrap"><table><thead><tr><th>Job</th><th>Status</th><th>Customer</th><th>Service</th><th>Branch</th><th>Revenue</th><th>Payment Status</th>{setModal && <th>Action</th>}</tr></thead><tbody>{jobs.length ? jobs.map(job => { const customer = data.customers.find(item => item.id === job.customerId); const service = data.services.find(item => item.id === job.serviceId); const paymentStatus = getPaymentStatus(job, data); return <tr key={job.id}><td><strong className="linkish">{job.number}</strong><small>{job.date}</small></td><td><StatusBadge value={job.status} /></td><td><strong>{customer?.company || customer?.name}</strong><small>{customer?.type}</small></td><td>{service?.name}<small>{service?.division}</small></td><td>{data.branches.find(item => item.id === job.branchId)?.name.replace(' Branch', '')}</td><td><strong>{money(job.revenue)}</strong><small className="profit-text">{Math.round((job.revenue - job.cost) / job.revenue * 100)}% margin</small></td><td><StatusBadge value={paymentStatus} /></td>{setModal && <td><button className="more-button" onClick={() => { setModal?.('job-status'); setModalData?.(job); }}>Update</button></td>}</tr>; }) : <tr><td colSpan={8}><EmptyState title="No jobs match" /></td></tr>}</tbody></table></div>; }
 function MiniStat({ label, value, tone }: { label: string; value: string; tone: string }) { return <div className={`mini-stat ${tone}`}><span>{label}</span><strong>{value}</strong></div>; }
 function FilterButton({ label }: { label: string }) { return <button className="filter-button"><Filter size={15} />{label}<ChevronDown size={14} /></button>; }
 
@@ -386,36 +316,38 @@ function ReportsView({ data, revenue, expenses }: { data: AppData; revenue: numb
 function ReportCard({ icon, title, description }: { icon: ReactNode; title: string; description: string }) { return <button className="report-card"><span>{icon}</span><strong>{title}</strong><p>{description}</p><ArrowUpRight size={16} /></button>; }
 
 function SettingsView({ data, exportData, importData, resetData, setModal }: { data: AppData; updateData: (data: AppData) => void; exportData: () => void; importData: () => void; resetData: () => void; notify: (message: string) => void; setModal: (modal: Modal) => void }) { return <><PageHeader eyebrow="Workspace controls" title="Settings" description="Configure Gabfix for the way your business operates." action={<Button icon={<Plus size={17} />} onClick={() => setModal('service')}>Add service</Button>} /><div className="settings-layout"><aside className="settings-nav"><button className="active">Company profile</button><button>Services & pricing <b>{data.services.length}</b></button><button>Business divisions</button><button>Payment methods</button><button>Data & backup</button></aside><div className="settings-content"><section className="panel settings-card"><div className="settings-title">                <div className="company-logo"><img src={gabfixLogo} alt="Gabfix logo" /></div>
-<div><h2>Gabfix Home Solutions</h2><p>Company profile and workspace identity</p></div><button className="more-button">Change logo</button></div><div className="form-grid"><label>Company name<input value="Gabfix Home Solutions" readOnly /></label><label>Default currency<select defaultValue="UGX"><option>UGX — Ugandan Shilling</option><option>USD — US Dollar</option></select></label><label>Phone number<input value="+256 772 000 447" readOnly /></label><label>Accounting basis<select defaultValue="Cash basis"><option>Cash basis</option><option>Accrual basis</option></select></label><label className="full">Business address<input value="Plot 18, Kira Road, Kampala, Uganda" readOnly /></label></div><div className="settings-footer"><span>Changes are saved automatically in this browser.</span><Button variant="secondary">Save changes</Button></div></section><section className="panel settings-card"><div className="panel-heading"><div><span className="eyebrow">Data management</span><h2>Backup & restore</h2><p>Keep a portable copy of your Gabfix workspace.</p></div><FileText size={20} className="muted-icon" /></div><div className="backup-actions"><button onClick={exportData}><Download size={17} /><span><strong>Export backup</strong><small>Download all records as JSON</small></span><ArrowUpRight size={15} /></button><button onClick={importData}><Upload size={17} /><span><strong>Import backup</strong><small>Restore a previous workspace</small></span><ArrowUpRight size={15} /></button><button onClick={resetData}><Activity size={17} /><span><strong>Reset demo data</strong><small>Restore the original example records</small></span><ArrowUpRight size={15} /></button></div></section><div className="future-note"><Sparkles size={18} /><div><strong>Built for your next stage</strong><p>Gabfix currently stores data in this browser. Its records are organized behind a clean data layer so a shared online database can be connected when your team is ready.</p></div></div></div></div></>; }
+<div><h2>Gabfix Home Solutions</h2><p>Company profile and workspace identity</p></div><button className="more-button">Change logo</button></div><div className="form-grid"><label>Company name<input value="Gabfix Home Solutions" readOnly /></label><label>Default currency<select defaultValue="UGX"><option>UGX — Ugandan Shilling</option><option>USD — US Dollar</option></select></label><label>Phone number<input value="+256 772 000 447" readOnly /></label><label>Accounting basis<select defaultValue="Cash basis"><option>Cash basis</option><option>Accrual basis</option></select></label><label className="full">Business address<input value="Plot 18, Kira Road, Kampala, Uganda" readOnly /></label></div><div className="settings-footer"><span>Changes are saved automatically in this browser.</span><Button variant="secondary">Save changes</Button></div></section><section className="panel settings-card"><div className="panel-heading"><div><span className="eyebrow">Data management</span><h2>Backup & restore</h2><p>Keep a portable copy of your Gabfix workspace.</p></div><FileText size={20} className="muted-icon" /></div><div className="backup-actions"><button onClick={exportData}><Download size={17} /><span><strong>Export backup</strong><small>Download all records as JSON</small></span><ArrowUpRight size={15} /></button><button onClick={importData}><Upload size={17} /><span><strong>Import backup</strong><small>Restore a previous workspace</small></span><ArrowUpRight size={15} /></button><button onClick={resetData}><Activity size={17} /><span><strong>Reset demo data</strong><small>Restore the original example records</small></span><ArrowUpRight size={15} /></button></div></section><div className="future-note"><Sparkles size={18} /><div><strong>Built for your next stage</strong><p>Your records are stored in PostgreSQL and served through the Gabfix API — safe to share across your team and included in every backup.</p></div></div></div></div></>; }
 
-function ModalShell({ type, data, updateData, close, notify, modalData }: { type: Modal; data: AppData; updateData: (data: AppData) => void; close: () => void; notify: (message: string) => void; modalData?: any }) { const titles: Record<string, string> = { job: 'Create a new job', customer: 'Add a customer', expense: 'Record an expense', service: 'Add a service', equipment: 'Add equipment', 'job-status': 'Update job status' }; return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}><div className="modal"><div className="modal-header"><div><span className="eyebrow">Gabfix workspace</span><h2>{type ? titles[type] : ''}</h2></div><button className="icon-button" onClick={close}><X size={18} /></button></div>{type === 'job' && <JobForm data={data} updateData={updateData} close={close} notify={notify} />}{type === 'customer' && <CustomerForm data={data} updateData={updateData} close={close} notify={notify} />}{type === 'expense' && <ExpenseForm data={data} updateData={updateData} close={close} notify={notify} />}{type === 'service' && <ServiceForm data={data} updateData={updateData} close={close} notify={notify} />}{type === 'equipment' && <EquipmentForm data={data} updateData={updateData} close={close} notify={notify} />}{modalData && type === 'job-status' && <JobStatusModal job={modalData} data={data} updateData={updateData} close={close} notify={notify} />}</div></div>; }
-function JobForm({ data, updateData, close, notify }: { data: AppData; updateData: (data: AppData) => void; close: () => void; notify: (message: string) => void }) { const [form, setForm] = useState({ customerId: data.customers[0].id, serviceId: data.services[0].id, branchId: data.branches[0].id, date: today, revenue: String(data.services[0].price), status: 'Scheduled' as JobStatus }); const update = (key: string, value: string) => setForm(previous => ({ ...previous, [key]: value })); const submit = (event: FormEvent) => { event.preventDefault(); const job: Job = { id: `j${Date.now()}`, number: `JOB-${String(data.jobs.length + 143).padStart(5, '0')}`, customerId: form.customerId, branchId: form.branchId, serviceId: form.serviceId, date: form.date, status: form.status, revenue: Number(form.revenue), cost: Math.round(Number(form.revenue) * .36), assignees: [] }; updateData({ ...data, jobs: [job, ...data.jobs] }); notify('Job created successfully'); close(); }; return <form onSubmit={submit} className="modal-form"><div className="form-grid"><label>Customer<select value={form.customerId} onChange={event => update('customerId', event.target.value)}>{data.customers.map(item => <option key={item.id} value={item.id}>{item.company || item.name}</option>)}</select></label><label>Service<select value={form.serviceId} onChange={event => { const service = data.services.find(item => item.id === event.target.value); update('serviceId', event.target.value); update('revenue', String(service?.price ?? 0)); }}>{data.services.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Branch<select value={form.branchId} onChange={event => update('branchId', event.target.value)}>{data.branches.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Scheduled date<input type="date" value={form.date} onChange={event => update('date', event.target.value)} /></label><label>Estimated revenue<input type="number" min="0" value={form.revenue} onChange={event => update('revenue', event.target.value)} /></label><label>Status<select value={form.status} onChange={event => update('status', event.target.value)}><option>Scheduled</option><option>Quoted</option><option>In Progress</option><option>Completed</option></select></label></div><div className="modal-actions"><Button variant="secondary" onClick={close}>Cancel</Button><Button icon={<Check size={16} />}>Create job</Button></div></form>; }
-function CustomerForm({ data, updateData, close, notify }: { data: AppData; updateData: (data: AppData) => void; close: () => void; notify: (message: string) => void }) { const [form, setForm] = useState({ name: '', company: '', phone: '', email: '', type: 'Residential' }); const update = (key: string, value: string) => setForm(previous => ({ ...previous, [key]: value })); const submit = (event: FormEvent) => { event.preventDefault(); if (!form.name.trim() || !form.phone.trim()) return; updateData({ ...data, customers: [{ ...form, id: `c${Date.now()}`, balance: 0, status: 'Active' }, ...data.customers] }); notify('Customer added successfully'); close(); }; return <form onSubmit={submit} className="modal-form"><div className="form-grid"><label className="full">Full name<input required placeholder="e.g. Amina Nakato" value={form.name} onChange={event => update('name', event.target.value)} /></label><label>Customer type<select value={form.type} onChange={event => update('type', event.target.value)}><option>Residential</option><option>Business</option><option>Corporate Client</option><option>Property Manager</option><option>Walk-in Customer</option></select></label><label>Company (optional)<input placeholder="Company name" value={form.company} onChange={event => update('company', event.target.value)} /></label><label>Phone number<input required placeholder="+256 ..." value={form.phone} onChange={event => update('phone', event.target.value)} /></label><label>Email address<input type="email" placeholder="name@example.com" value={form.email} onChange={event => update('email', event.target.value)} /></label></div><div className="modal-actions"><Button variant="secondary" onClick={close}>Cancel</Button><Button icon={<Check size={16} />}>Save customer</Button></div></form>; }
-function ExpenseForm({ data, updateData, close, notify }: { data: AppData; updateData: (data: AppData) => void; close: () => void; notify: (message: string) => void }) { const [form, setForm] = useState({ category: 'Supplies', description: '', amount: '', branchId: data.branches[0].id, division: 'Company overhead' }); const update = (key: string, value: string) => setForm(previous => ({ ...previous, [key]: value })); const submit = (event: FormEvent) => { event.preventDefault(); if (!form.description.trim() || !form.amount) return; updateData({ ...data, expenses: [{ ...form, id: `e${Date.now()}`, amount: Number(form.amount), date: today }, ...data.expenses] }); notify('Expense recorded'); close(); }; return <form onSubmit={submit} className="modal-form"><div className="form-grid"><label>Amount<input required type="number" min="0" placeholder="0" value={form.amount} onChange={event => update('amount', event.target.value)} /></label><label>Category<select value={form.category} onChange={event => update('category', event.target.value)}><option>Supplies</option><option>Payroll</option><option>Fuel</option><option>Repairs</option><option>Rent</option><option>Utilities</option><option>Marketing</option><option>Other</option></select></label><label className="full">Description<input required placeholder="What was this expense for?" value={form.description} onChange={event => update('description', event.target.value)} /></label><label>Branch<select value={form.branchId} onChange={event => update('branchId', event.target.value)}>{data.branches.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Business division<select value={form.division} onChange={event => update('division', event.target.value)}><option>Company overhead</option><option>Cleaning Services</option><option>Home Solutions</option><option>Laundry</option><option>Vehicle Services</option></select></label></div><div className="modal-actions"><Button variant="secondary" onClick={close}>Cancel</Button><Button icon={<Check size={16} />}>Record expense</Button></div></form>; }
-function ServiceForm({ data, updateData, close, notify }: { data: AppData; updateData: (data: AppData) => void; close: () => void; notify: (message: string) => void }) { const [form, setForm] = useState({ name: '', division: 'Other Services', method: 'Fixed price', price: '' }); const update = (key: string, value: string) => setForm(previous => ({ ...previous, [key]: value })); const submit = (event: FormEvent) => { event.preventDefault(); if (!form.name.trim()) return; updateData({ ...data, services: [{ ...form, id: `s${Date.now()}`, price: Number(form.price) || 0, active: true }, ...data.services] }); notify('Service added to your catalog'); close(); }; return <form onSubmit={submit} className="modal-form"><div className="form-grid"><label className="full">Service name<input required placeholder="e.g. Generator installation" value={form.name} onChange={event => update('name', event.target.value)} /></label><label>Business division<select value={form.division} onChange={event => update('division', event.target.value)}><option>Cleaning Services</option><option>Contract Cleaning</option><option>Home Solutions</option><option>Vehicle Services</option><option>Laundry</option><option>Other Services</option></select></label><label>Pricing method<select value={form.method} onChange={event => update('method', event.target.value)}><option>Fixed price</option><option>Per hour</option><option>Per item</option><option>Per kilogram</option><option>Per visit</option><option>Custom quotation</option></select></label><label>Default price<input type="number" min="0" value={form.price} onChange={event => update('price', event.target.value)} placeholder="0" /></label></div><div className="modal-actions"><Button variant="secondary" onClick={close}>Cancel</Button><Button icon={<Check size={16} />}>Add service</Button></div></form>; }
+function ModalShell({ type, data, close, notify, modalData, refresh }: { type: Modal; data: AppData; close: () => void; notify: (message: string) => void; modalData?: any; refresh: () => Promise<void> }) { const titles: Record<string, string> = { job: 'Create a new job', customer: 'Add a customer', expense: 'Record an expense', service: 'Add a service', equipment: 'Add equipment', 'job-status': 'Update job status' }; return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}><div className="modal"><div className="modal-header"><div><span className="eyebrow">Gabfix workspace</span><h2>{type ? titles[type] : ''}</h2></div><button className="icon-button" onClick={close}><X size={18} /></button></div>{type === 'job' && <JobForm data={data} close={close} notify={notify} refresh={refresh} />}{type === 'customer' && <CustomerForm close={close} notify={notify} refresh={refresh} />}{type === 'expense' && <ExpenseForm data={data} close={close} notify={notify} refresh={refresh} />}{type === 'service' && <ServiceForm close={close} notify={notify} refresh={refresh} />}{type === 'equipment' && <EquipmentForm data={data} close={close} notify={notify} refresh={refresh} />}{modalData && type === 'job-status' && <JobStatusModal job={modalData} data={data} close={close} notify={notify} refresh={refresh} />}</div></div>; }
+function JobForm({ data, close, notify, refresh }: { data: AppData; close: () => void; notify: (message: string) => void; refresh: () => Promise<void> }) { const [form, setForm] = useState({ customerId: data.customers[0].id, serviceId: data.services[0].id, branchId: data.branches[0].id, date: today, revenue: String(data.services[0].price), status: 'Scheduled' as JobStatus }); const update = (key: string, value: string) => setForm(previous => ({ ...previous, [key]: value })); const submit = (event: FormEvent) => { event.preventDefault(); (async () => { try { await api.createJob({ number: `JOB-${String(data.jobs.length + 143).padStart(5, '0')}`, customerId: form.customerId, branchId: form.branchId, serviceId: form.serviceId, date: form.date, status: form.status, revenue: Number(form.revenue), cost: Math.round(Number(form.revenue) * .36), assignees: [] }); await refresh(); notify('Job created successfully'); } catch { notify('Could not create the job'); } close(); })(); }; return <form onSubmit={submit} className="modal-form"><div className="form-grid"><label>Customer<select value={form.customerId} onChange={event => update('customerId', event.target.value)}>{data.customers.map(item => <option key={item.id} value={item.id}>{item.company || item.name}</option>)}</select></label><label>Service<select value={form.serviceId} onChange={event => { const service = data.services.find(item => item.id === event.target.value); update('serviceId', event.target.value); update('revenue', String(service?.price ?? 0)); }}>{data.services.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Branch<select value={form.branchId} onChange={event => update('branchId', event.target.value)}>{data.branches.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Scheduled date<input type="date" value={form.date} onChange={event => update('date', event.target.value)} /></label><label>Estimated revenue<input type="number" min="0" value={form.revenue} onChange={event => update('revenue', event.target.value)} /></label><label>Status<select value={form.status} onChange={event => update('status', event.target.value)}><option>Scheduled</option><option>Quoted</option><option>In Progress</option><option>Completed</option></select></label></div><div className="modal-actions"><Button variant="secondary" onClick={close}>Cancel</Button><Button icon={<Check size={16} />}>Create job</Button></div></form>; }
+function CustomerForm({ close, notify, refresh }: { close: () => void; notify: (message: string) => void; refresh: () => Promise<void> }) { const [form, setForm] = useState({ name: '', company: '', phone: '', email: '', type: 'Residential' }); const update = (key: string, value: string) => setForm(previous => ({ ...previous, [key]: value })); const submit = (event: FormEvent) => { event.preventDefault(); if (!form.name.trim() || !form.phone.trim()) return; (async () => { try { await api.createCustomer({ ...form, balance: 0, status: 'Active' }); await refresh(); notify('Customer added successfully'); } catch { notify('Could not add the customer'); } close(); })(); }; return <form onSubmit={submit} className="modal-form"><div className="form-grid"><label className="full">Full name<input required placeholder="e.g. Amina Nakato" value={form.name} onChange={event => update('name', event.target.value)} /></label><label>Customer type<select value={form.type} onChange={event => update('type', event.target.value)}><option>Residential</option><option>Business</option><option>Corporate Client</option><option>Property Manager</option><option>Walk-in Customer</option></select></label><label>Company (optional)<input placeholder="Company name" value={form.company} onChange={event => update('company', event.target.value)} /></label><label>Phone number<input required placeholder="+256 ..." value={form.phone} onChange={event => update('phone', event.target.value)} /></label><label>Email address<input type="email" placeholder="name@example.com" value={form.email} onChange={event => update('email', event.target.value)} /></label></div><div className="modal-actions"><Button variant="secondary" onClick={close}>Cancel</Button><Button icon={<Check size={16} />}>Save customer</Button></div></form>; }
+function ExpenseForm({ data, close, notify, refresh }: { data: AppData; close: () => void; notify: (message: string) => void; refresh: () => Promise<void> }) { const [form, setForm] = useState({ category: 'Supplies', description: '', amount: '', branchId: data.branches[0].id, division: 'Company overhead' }); const update = (key: string, value: string) => setForm(previous => ({ ...previous, [key]: value })); const submit = (event: FormEvent) => { event.preventDefault(); if (!form.description.trim() || !form.amount) return; (async () => { try { await api.createExpense({ category: form.category, description: form.description, amount: Number(form.amount), branchId: form.branchId, division: form.division, date: today }); await refresh(); notify('Expense recorded'); } catch { notify('Could not record the expense'); } close(); })(); }; return <form onSubmit={submit} className="modal-form"><div className="form-grid"><label>Amount<input required type="number" min="0" placeholder="0" value={form.amount} onChange={event => update('amount', event.target.value)} /></label><label>Category<select value={form.category} onChange={event => update('category', event.target.value)}><option>Supplies</option><option>Payroll</option><option>Fuel</option><option>Repairs</option><option>Rent</option><option>Utilities</option><option>Marketing</option><option>Other</option></select></label><label className="full">Description<input required placeholder="What was this expense for?" value={form.description} onChange={event => update('description', event.target.value)} /></label><label>Branch<select value={form.branchId} onChange={event => update('branchId', event.target.value)}>{data.branches.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Business division<select value={form.division} onChange={event => update('division', event.target.value)}><option>Company overhead</option><option>Cleaning Services</option><option>Home Solutions</option><option>Laundry</option><option>Vehicle Services</option></select></label></div><div className="modal-actions"><Button variant="secondary" onClick={close}>Cancel</Button><Button icon={<Check size={16} />}>Record expense</Button></div></form>; }
+function ServiceForm({ close, notify, refresh }: { close: () => void; notify: (message: string) => void; refresh: () => Promise<void> }) { const [form, setForm] = useState({ name: '', division: 'Other Services', method: 'Fixed price', price: '' }); const update = (key: string, value: string) => setForm(previous => ({ ...previous, [key]: value })); const submit = (event: FormEvent) => { event.preventDefault(); if (!form.name.trim()) return; (async () => { try { await api.createService({ name: form.name, division: form.division, method: form.method, price: Number(form.price) || 0, active: true }); await refresh(); notify('Service added to your catalog'); } catch { notify('Could not add the service'); } close(); })(); }; return <form onSubmit={submit} className="modal-form"><div className="form-grid"><label className="full">Service name<input required placeholder="e.g. Generator installation" value={form.name} onChange={event => update('name', event.target.value)} /></label><label>Business division<select value={form.division} onChange={event => update('division', event.target.value)}><option>Cleaning Services</option><option>Contract Cleaning</option><option>Home Solutions</option><option>Vehicle Services</option><option>Laundry</option><option>Other Services</option></select></label><label>Pricing method<select value={form.method} onChange={event => update('method', event.target.value)}><option>Fixed price</option><option>Per hour</option><option>Per item</option><option>Per kilogram</option><option>Per visit</option><option>Custom quotation</option></select></label><label>Default price<input type="number" min="0" value={form.price} onChange={event => update('price', event.target.value)} placeholder="0" /></label></div><div className="modal-actions"><Button variant="secondary" onClick={close}>Cancel</Button><Button icon={<Check size={16} />}>Add service</Button></div></form>; }
 
-function EquipmentForm({ data, updateData, close, notify }: { data: AppData; updateData: (data: AppData) => void; close: () => void; notify: (message: string) => void }) {
+function EquipmentForm({ data, close, notify, refresh }: { data: AppData; close: () => void; notify: (message: string) => void; refresh: () => Promise<void> }) {
   const [form, setForm] = useState({ name: '', serialNumber: '', type: 'Washing machine', branchId: data.branches[0]?.id || '', value: '', bookValue: '' });
   const update = (key: string, value: string) => setForm(previous => ({ ...previous, [key]: value }));
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (!form.name.trim() || !form.serialNumber.trim() || !form.value) return;
-    const equipment: Equipment = {
-      id: `a${Date.now()}`,
-      name: form.name,
-      serialNumber: form.serialNumber,
-      type: form.type,
-      branchId: form.branchId,
-      value: Number(form.value),
-      bookValue: Number(form.bookValue) || Number(form.value),
-      condition: 'Good',
-      nextMaintenance: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-      usage: 0
-    };
-    updateData({ ...data, equipment: [equipment, ...data.equipment] });
-    notify('Equipment added successfully');
-    close();
+    (async () => {
+      try {
+        await api.createEquipment({
+          name: form.name,
+          serialNumber: form.serialNumber,
+          type: form.type,
+          branchId: form.branchId,
+          value: Number(form.value),
+          bookValue: Number(form.bookValue) || Number(form.value),
+        });
+        await refresh();
+        notify('Equipment added successfully');
+      } catch {
+        notify('Could not add the equipment');
+      }
+      close();
+    })();
   };
 
   return (

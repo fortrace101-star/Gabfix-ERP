@@ -1,0 +1,59 @@
+import 'dotenv/config';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { Client } from 'pg';
+import { seedData } from './seed-data';
+
+const here = dirname(fileURLToPath(import.meta.url));
+
+const connection = (database: string) => ({
+  host: process.env.PGHOST || 'localhost',
+  port: Number(process.env.PGPORT) || 5432,
+  user: process.env.PGUSER || 'postgres',
+  password: process.env.PGPASSWORD || '',
+  database,
+});
+
+/**
+ * Ensure the application database exists, then apply schema.sql and seed demo
+ * data when empty. Safe (idempotent) to run on every server start.
+ */
+export async function ensureDatabase(): Promise<void> {
+  const dbName = process.env.PGDATABASE || 'gabfix';
+
+  // 1. Create the database itself if it does not exist (requires the admin DB).
+  const admin = new Client(connection('postgres'));
+  await admin.connect();
+  const exists = await admin.query(`SELECT 1 FROM pg_database WHERE datname = $1`, [dbName]);
+  if (exists.rowCount === 0) {
+    await admin.query(`CREATE DATABASE ${JSON.stringify(dbName)}`);
+    console.log(`[db] Created database ${dbName}`);
+  } else {
+    console.log(`[db] Database ${dbName} already exists`);
+  }
+  await admin.end();
+
+  // 2. Apply the schema and seed data to the application database.
+  const client = new Client(connection(dbName));
+  await client.connect();
+
+  // Some PostgreSQL installs ship with search_path="$user" only, which breaks
+  // unqualified CREATE TABLE / SELECT statements. Force the public schema.
+  await client.query(`ALTER DATABASE ${JSON.stringify(dbName)} SET search_path TO public`);
+  await client.query('SET search_path TO public');
+
+  const schema = readFileSync(join(here, 'schema.sql'), 'utf8');
+  await client.query(schema);
+  console.log('[db] Schema applied');
+
+  const { rows } = await client.query(`SELECT COUNT(*)::int AS count FROM branches`);
+  if (rows[0].count > 0) {
+    console.log('[db] Data already present, skipping seed');
+  } else {
+    await seedData(client);
+    console.log('[db] Seed data inserted');
+  }
+
+  await client.end();
+}
