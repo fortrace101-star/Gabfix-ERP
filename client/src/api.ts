@@ -36,6 +36,12 @@ export const createEquipment = (equipment: Record<string, unknown>) =>
 export const updateEquipment = (id: string, patch: Record<string, unknown>) =>
   request(`/api/equipment/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
 
+export const createInventory = (item: Record<string, unknown>) =>
+  request('/api/inventory', { method: 'POST', body: JSON.stringify(item) });
+
+export const updateInventory = (id: string, patch: Record<string, unknown>) =>
+  request(`/api/inventory/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+
 /** Replace all database records with a full backup payload. */
 export const importData = (payload: AppData) =>
   request('/api/import', { method: 'POST', body: JSON.stringify(payload) });

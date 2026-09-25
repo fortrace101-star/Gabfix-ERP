@@ -1,5 +1,5 @@
 export type View = 'dashboard' | 'jobs' | 'customers' | 'finance' | 'laundry' | 'equipment' | 'inventory' | 'reports' | 'settings';
-export type Modal = 'job' | 'customer' | 'expense' | 'service' | 'equipment' | 'job-status' | null;
+export type Modal = 'job' | 'customer' | 'expense' | 'service' | 'equipment' | 'equipment-update' | 'job-status' | 'inventory' | 'reorder' | null;
 export type JobStatus = 'Completed' | 'In Progress' | 'Scheduled' | 'Quoted';
 
 export type Branch = { id: string; name: string; location: string };

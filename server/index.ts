@@ -49,7 +49,7 @@ function insertSql(table: string, entries: [string, unknown][], id: string) {
   const columns = entries.map(([column]) => column);
   const placeholders = columns.map((_, index) => `$${index + 1}`).join(', ');
   return {
-    text: `INSERT INTO ${table} (id, ${columns.map((c) => `"${c}"`).join(', ')}) VALUES ($${columns.length + 1}, ${placeholders})`,
+    text: `INSERT INTO ${table} (id, ${columns.map((c) => `"${c}"`).join(', ')}) VALUES ($${columns.length + 1}, ${placeholders}) RETURNING id`,
     values: [...entries.map(([, value]) => value), id],
   };
 }
@@ -165,6 +165,37 @@ app.post('/api/equipment', async (req, res) => {
     res.status(201).json({ id: rows[0].id });
   } catch (error) {
     fail(res, error, 'Invalid equipment');
+  }
+});
+
+app.post('/api/inventory', async (req, res) => {
+  try {
+    const body = req.body ?? {};
+    required(body, ['name', 'category', 'branchId']);
+    const entries = toColumns('inventory_items', {
+      ...body,
+      unit: body.unit ?? 'unit',
+      quantity: body.quantity ?? 0,
+      minimum: body.minimum ?? 0,
+      cost: body.cost ?? 0,
+    });
+    const id = `i${Date.now()}`;
+    const { rows } = await pool.query(insertSql('inventory_items', entries, id));
+    res.status(201).json({ id: rows[0].id });
+  } catch (error) {
+    fail(res, error, 'Invalid inventory item');
+  }
+});
+
+app.patch('/api/inventory/:id', async (req, res) => {
+  try {
+    const entries = toColumns('inventory_items', req.body ?? {});
+    const sets = entries.map(([column], index) => `"${column}" = $${index + 1}`).join(', ');
+    const { rowCount } = await pool.query(`UPDATE inventory_items SET ${sets} WHERE id = $${entries.length + 1}`, [...entries.map(([, value]) => value), req.params.id]);
+    if (!rowCount) return res.status(404).json({ error: 'Inventory item not found' });
+    res.json({ ok: true });
+  } catch (error) {
+    fail(res, error, 'Invalid inventory update');
   }
 });
 

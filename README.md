@@ -13,16 +13,17 @@ Monorepo with two projects:
    ```
    npm run setup
    ```
-3. Create and seed the database:
-   ```
-   npm run db:init
-   ```
-4. Run the API and the web app together:
+3. Run the API and the web app together:
    ```
    npm run dev
    ```
    - API: http://localhost:4000 (also proxied under `/api` for the web app)
    - Web: http://localhost:5173
+
+   On startup the server bootstraps the database automatically: it creates the
+   `gabfix` database if it does not exist, applies `server/schema.sql`, and seeds
+   demo data when the database is empty. `npm run db:init` is still available to
+   run the same steps manually.
 
 ## Scripts
 
@@ -32,7 +33,7 @@ Monorepo with two projects:
 | `npm run dev`        | Runs client + server concurrently               |
 | `npm run dev:client` | Client (Vite) only                              |
 | `npm run dev:server` | Server (Express) only                           |
-| `npm run db:init`    | Creates the database, applies schema, seeds     |
+| `npm run db:init`    | Creates the database, applies schema, seeds (also runs automatically on server start) |
 | `npm run build`      | Production build of the client                  |
 | `npm run typecheck`  | TypeScript checks for both projects             |
 
@@ -49,6 +50,6 @@ Each project also has its own `package.json`, so you can work inside `client/` o
 
 ```
 ├── client/            React app (Vite, Tailwind); src/api.ts is the gateway to the backend
-├── server/            Express API, PostgreSQL pool (db.ts), schema (schema.sql), seed data (seed-data.ts)
+├── server/            Express API, PostgreSQL pool (db.ts), schema (schema.sql), seed data (seed-data.ts), auto-bootstrap (bootstrap-db.ts)
 └── scripts/dev.mjs    Concurrent dev runner used by `npm run dev`
 ```
