@@ -45,13 +45,21 @@ Each project also has its own `package.json`, so you can work inside `client/` o
 
 - All records live in PostgreSQL — the browser no longer stores anything in localStorage.
 - `GET /api/data` returns the full workspace snapshot the UI renders.
-- Creating/updating records goes through the REST endpoints in `server/index.ts`.
+- Creating/updating records goes through the REST endpoints in `server/routes/` (one router per domain).
 - Settings → Backup & restore exports/imports the same JSON via `/api/import`, and "Reset demo data" reseeds the database through `/api/reset`.
 
 ## Structure
 
 ```
 ├── client/            React app (Vite, Tailwind); src/api.ts is the gateway to the backend
-├── server/            Express API, PostgreSQL pool (db.ts), migrations (migrations/ + migrate.ts), seed data (seed-data.ts), auto-bootstrap (bootstrap-db.ts)
+├── server/            Express API
+│   ├── index.ts       Wiring only: middleware, routers, 404, listen
+│   ├── routes/        One router per domain (auth, workspace, customers, jobs, equipment, expenses, services, inventory, admin)
+│   ├── repositories/  SQL and data access (workspace reads, generic record writes)
+│   ├── lib/           Shared helpers (table metadata, HTTP error handling)
+│   ├── middleware/    Auth guard (requireAuth / requireRole / guard)
+│   ├── migrations/    Additive SQL files applied by migrate.ts, tracked in schema_migrations
+│   ├── bootstrap-db.ts  Creates the database, migrates and seeds on startup
+│   └── seed-data.ts   Demo data plus the owner login
 └── scripts/dev.mjs    Concurrent dev runner used by `npm run dev`
 ```
