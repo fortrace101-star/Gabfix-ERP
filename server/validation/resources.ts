@@ -1,0 +1,364 @@
+import { z } from 'zod';
+import {
+  dateText,
+  idText,
+  money,
+  optionalDateText,
+  optionalEquipmentUsage,
+  optionalMoney,
+  optionalText,
+  optionalTextList,
+  text,
+} from './common';
+
+/**
+ * One resource per stored table (Phase 0.7).
+ *
+ * `columns` is the explicit field -> column map for that resource: a field that
+ * is not listed here can never reach SQL, and because every schema is strict a
+ * field that is not in the schema is rejected with 422 instead of being dropped.
+ *
+ * `create`/`patch` validate request bodies for the routes; `row` validates one
+ * record inside a backup payload (POST /api/import) and is deliberately lenient
+ * about *missing* fields — column defaults still apply — but never about
+ * unknown ones.
+ */
+export type Resource = {
+  table: string;
+  /** Collection key inside a backup payload (the AppData shape). */
+  dataKey: string;
+  /** Human label for fallback error messages, e.g. "customer" -> "Invalid customer". */
+  label: string;
+  /** Explicit camelCase field -> snake_case column map. */
+  columns: Record<string, string>;
+  /** Columns the pg driver needs stringified (JSONB). */
+  jsonColumns?: ReadonlySet<string>;
+  create: z.ZodType;
+  patch?: z.ZodType;
+  row: z.ZodType;
+};
+
+/** Columns stored as JSONB must be stringified before reaching the pg driver. */
+export const JSONB_COLUMNS: ReadonlySet<string> = new Set(['equipment_usage']);
+
+/** Job lifecycle values used by the client (types.ts) and the seed data. */
+export const JOB_STATUSES = ['Scheduled', 'In Progress', 'Completed', 'Quoted', 'Cancelled'] as const;
+const jobStatus = z.enum(JOB_STATUSES);
+
+/** A PATCH must change something; an empty body is a validation failure. */
+const atLeastOneField = <T extends z.ZodType>(schema: T) =>
+  schema.refine((value) => Object.keys(value as Record<string, unknown>).length > 0, {
+    message: 'Provide at least one field to update',
+  });
+
+/** Import rows may omit anything the database can default, and may carry an id. */
+const importRow = <T extends z.ZodObject<z.ZodRawShape>>(create: T) =>
+  create.partial().extend({ id: idText.optional() });
+
+/**
+ * branches — only ever written by a backup import or the demo seed today.
+ */
+export const branchesResource: Resource = {
+  table: 'branches',
+  dataKey: 'branches',
+  label: 'branch',
+  columns: { name: 'name', location: 'location' },
+  create: z.strictObject({ name: text, location: optionalText.optional() }),
+  row: importRow(z.strictObject({ name: text, location: optionalText.optional() })),
+};
+
+/**
+ * customers — name and phone open an account; everything else is optional.
+ */
+const customerCreate = z.strictObject({
+  name: text,
+  phone: text,
+  company: optionalText.optional(),
+  type: optionalText.optional(),
+  email: optionalText.optional(),
+  balance: optionalMoney,
+  status: optionalText.optional(),
+});
+
+export const customersResource: Resource = {
+  table: 'customers',
+  dataKey: 'customers',
+  label: 'customer',
+  columns: {
+    name: 'name',
+    company: 'company',
+    type: 'type',
+    phone: 'phone',
+    email: 'email',
+    balance: 'balance',
+    status: 'status',
+  },
+  create: customerCreate,
+  row: importRow(customerCreate),
+};
+
+/**
+ * services — a catalogue entry; price and active flag drive every pricing view.
+ */
+const serviceCreate = z.strictObject({
+  name: text,
+  division: optionalText.optional(),
+  method: optionalText.optional(),
+  price: optionalMoney,
+  active: z.boolean().optional(),
+});
+
+export const servicesResource: Resource = {
+  table: 'services',
+  dataKey: 'services',
+  label: 'service',
+  columns: { name: 'name', division: 'division', method: 'method', price: 'price', active: 'active' },
+  create: serviceCreate,
+  row: importRow(serviceCreate),
+};
+
+/**
+ * jobs — the operational core: numbering, dates, money and the equipment log.
+ */
+const jobCreate = z.strictObject({
+  number: text,
+  customerId: idText,
+  branchId: idText,
+  serviceId: idText,
+  date: dateText,
+  status: jobStatus.optional(),
+  revenue: money,
+  cost: optionalMoney,
+  assignees: optionalTextList,
+  equipmentUsage: optionalEquipmentUsage,
+});
+
+export const jobsResource: Resource = {
+  table: 'jobs',
+  dataKey: 'jobs',
+  label: 'job',
+  columns: {
+    number: 'number',
+    customerId: 'customer_id',
+    branchId: 'branch_id',
+    serviceId: 'service_id',
+    date: 'date',
+    status: 'status',
+    revenue: 'revenue',
+    cost: 'cost',
+    assignees: 'assignees',
+    equipmentUsage: 'equipment_usage',
+  },
+  jsonColumns: JSONB_COLUMNS,
+  create: jobCreate,
+  // The job status modal patches status plus equipment hours.
+  patch: atLeastOneField(
+    z.strictObject({
+      status: jobStatus.optional(),
+      equipmentUsage: optionalEquipmentUsage,
+      assignees: optionalTextList,
+      revenue: optionalMoney,
+      cost: optionalMoney,
+      date: optionalDateText,
+    }),
+  ),
+  row: importRow(jobCreate),
+};
+
+/**
+ * expenses — operating costs; date defaults to today in the route when omitted.
+ */
+const expenseCreate = z.strictObject({
+  category: text,
+  description: text,
+  amount: money,
+  branchId: idText,
+  division: optionalText.optional(),
+  date: optionalDateText,
+});
+
+export const expensesResource: Resource = {
+  table: 'expenses',
+  dataKey: 'expenses',
+  label: 'expense',
+  columns: {
+    category: 'category',
+    description: 'description',
+    amount: 'amount',
+    branchId: 'branch_id',
+    date: 'date',
+    division: 'division',
+  },
+  create: expenseCreate,
+  row: importRow(expenseCreate),
+};
+
+/**
+ * equipment — assets, their book value and the next maintenance date.
+ */
+const equipmentCreate = z.strictObject({
+  name: text,
+  serialNumber: text,
+  type: optionalText.optional(),
+  branchId: idText,
+  value: money,
+  bookValue: optionalMoney,
+  condition: optionalText.optional(),
+  nextMaintenance: optionalDateText,
+  usage: optionalMoney,
+});
+
+export const equipmentResource: Resource = {
+  table: 'equipment',
+  dataKey: 'equipment',
+  label: 'equipment',
+  columns: {
+    name: 'name',
+    serialNumber: 'serial_number',
+    type: 'type',
+    branchId: 'branch_id',
+    value: 'value',
+    bookValue: 'book_value',
+    condition: 'condition',
+    nextMaintenance: 'next_maintenance',
+    usage: 'usage',
+  },
+  create: equipmentCreate,
+  // Asset update modal plus the usage bump when a job completes.
+  patch: atLeastOneField(
+    z.strictObject({
+      name: text.optional(),
+      serialNumber: text.optional(),
+      type: optionalText.optional(),
+      branchId: idText.optional(),
+      value: optionalMoney,
+      bookValue: optionalMoney,
+      condition: optionalText.optional(),
+      nextMaintenance: optionalDateText,
+      usage: optionalMoney,
+    }),
+  ),
+  row: importRow(equipmentCreate),
+};
+
+/**
+ * inventory_items — stock on hand. A stock movement posts `quantity` only; any
+ * other field (such as the note the modal collects) is rejected with 422 rather
+ * than silently dropped. Storing movement notes arrives with Phase 1.
+ */
+const inventoryCreate = z.strictObject({
+  name: text,
+  category: text,
+  unit: optionalText.optional(),
+  quantity: optionalMoney,
+  minimum: optionalMoney,
+  cost: optionalMoney,
+  branchId: idText,
+});
+
+export const inventoryResource: Resource = {
+  table: 'inventory_items',
+  dataKey: 'inventory',
+  label: 'inventory item',
+  columns: {
+    name: 'name',
+    category: 'category',
+    unit: 'unit',
+    quantity: 'quantity',
+    minimum: 'minimum',
+    cost: 'cost',
+    branchId: 'branch_id',
+  },
+  create: inventoryCreate,
+  patch: atLeastOneField(
+    z.strictObject({
+      name: text.optional(),
+      category: text.optional(),
+      unit: optionalText.optional(),
+      quantity: optionalMoney,
+      minimum: optionalMoney,
+      cost: optionalMoney,
+      branchId: idText.optional(),
+    }),
+  ),
+  row: importRow(inventoryCreate),
+};
+
+/**
+ * invoices and laundry_orders are read-only in this phase: no route writes them
+ * yet, so they only need a row schema for backup import.
+ */
+export const invoicesResource: Resource = {
+  table: 'invoices',
+  dataKey: 'invoices',
+  label: 'invoice',
+  columns: {
+    number: 'number',
+    customerId: 'customer_id',
+    date: 'date',
+    due: 'due',
+    total: 'total',
+    paid: 'paid',
+    status: 'status',
+  },
+  create: z.strictObject({}),
+  row: z.strictObject({
+    id: idText.optional(),
+    number: optionalText.optional(),
+    customerId: idText.optional(),
+    date: optionalDateText,
+    due: optionalDateText,
+    total: optionalMoney,
+    paid: optionalMoney,
+    status: optionalText.optional(),
+  }),
+};
+
+export const laundryResource: Resource = {
+  table: 'laundry_orders',
+  dataKey: 'laundry',
+  label: 'laundry order',
+  columns: {
+    number: 'number',
+    customerId: 'customer_id',
+    status: 'status',
+    total: 'total',
+    paid: 'paid',
+    items: 'items',
+    received: 'received',
+  },
+  create: z.strictObject({}),
+  row: z.strictObject({
+    id: idText.optional(),
+    number: optionalText.optional(),
+    customerId: idText.optional(),
+    status: optionalText.optional(),
+    total: optionalMoney,
+    paid: optionalMoney,
+    items: optionalText.optional(),
+    received: optionalDateText,
+  }),
+};
+
+/**
+ * Every resource, in import order: parents before children so foreign keys hold
+ * while a backup is restored.
+ */
+export const RESOURCES: Resource[] = [
+  branchesResource,
+  customersResource,
+  servicesResource,
+  jobsResource,
+  invoicesResource,
+  expensesResource,
+  laundryResource,
+  equipmentResource,
+  inventoryResource,
+];
+
+/** Look up a resource by table name; throws for a table nobody registered. */
+export function resourceByTable(table: string): Resource {
+  const resource = RESOURCES.find((candidate) => candidate.table === table);
+  if (!resource) throw new Error(`Unknown table ${table}`);
+  return resource;
+}

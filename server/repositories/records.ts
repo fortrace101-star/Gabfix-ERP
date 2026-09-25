@@ -1,22 +1,26 @@
 import type { Pool, PoolClient } from 'pg';
 import { pool } from '../db';
-import { JSONB_COLUMNS, TABLE_COLUMNS, TABLE_ORDER, TRUNCATE_TABLES, insertSql, placeholderId, snake, toColumns } from '../lib/tables';
+import { ValidationError } from '../lib/http';
+import { insertSql, placeholderId, TRUNCATE_TABLES } from '../lib/tables';
+import { parseBody, toColumnEntries } from '../validation/common';
+import { RESOURCES, type Resource } from '../validation/resources';
 
 /** Either the shared pool or a transaction client. */
 type Executor = Pool | PoolClient;
 
-/** Insert one row for a known table and return its primary key. */
-export async function insertRecord(table: string, body: Record<string, unknown>, id: string, executor: Executor = pool): Promise<string> {
-  const { rows } = await executor.query(insertSql(table, toColumns(table, body), id));
+/** Insert one validated row and return its primary key. */
+export async function insertRecord(resource: Resource, data: Record<string, unknown>, id: string, executor: Executor = pool): Promise<string> {
+  const entries = toColumnEntries(resource.columns, data, resource.jsonColumns);
+  const { rows } = await executor.query(insertSql(resource.table, entries, id));
   return rows[0].id as string;
 }
 
-/** Update one row; returns the number of rows changed (0 when the id is unknown). */
-export async function updateRecord(table: string, id: string, body: Record<string, unknown>): Promise<number> {
-  const entries = toColumns(table, body);
+/** Update one validated row; returns the number of rows changed (0 when the id is unknown). */
+export async function updateRecord(resource: Resource, id: string, data: Record<string, unknown>): Promise<number> {
+  const entries = toColumnEntries(resource.columns, data, resource.jsonColumns);
   const sets = entries.map(([column], index) => `"${column}" = $${index + 1}`).join(', ');
   const { rowCount } = await pool.query(
-    `UPDATE ${table} SET ${sets} WHERE id = $${entries.length + 1}`,
+    `UPDATE ${resource.table} SET ${sets} WHERE id = $${entries.length + 1}`,
     [...entries.map(([, value]) => value), id],
   );
   return rowCount ?? 0;
@@ -62,22 +66,33 @@ export async function truncateWorkspace(client: Executor): Promise<void> {
 
 /**
  * Replace the whole workspace from a backup payload (POST /api/import).
- * Caller owns the transaction.
+ * Every row is validated against its resource schema, so an unknown field in a
+ * backup is reported (422) with the collection and row position instead of
+ * being dropped. Caller owns the transaction.
  */
 export async function replaceAll(client: PoolClient, payload: Record<string, unknown>): Promise<void> {
-  for (const [table, dataKey] of TABLE_ORDER) {
-    const rows = payload[dataKey];
+  for (const resource of RESOURCES) {
+    const rows = payload[resource.dataKey];
     if (!Array.isArray(rows)) continue;
-    const allowed = TABLE_COLUMNS[table];
-    for (const row of rows as Record<string, unknown>[]) {
-      const entries: [string, unknown][] = [];
-      for (const [key, value] of Object.entries(row)) {
-        const column = snake(key);
-        if (!allowed.includes(column)) continue;
-        entries.push([column, JSONB_COLUMNS.has(column) ? JSON.stringify(value ?? []) : value]);
+    for (const [index, row] of rows.entries()) {
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = parseBody(resource.row, row) as Record<string, unknown>;
+      } catch (error) {
+        if (error instanceof ValidationError) throw withRowContext(resource, index, error);
+        throw error;
       }
-      const id = typeof row.id === 'string' && row.id ? row.id : placeholderId(table);
-      await client.query(insertSql(table, entries, id));
+      const id = typeof parsed.id === 'string' && parsed.id ? parsed.id : placeholderId(resource.table);
+      await insertRecord(resource, parsed, id, client);
     }
   }
+}
+
+/** Prefix field errors with the collection and row they came from, e.g. `jobs[3].note`. */
+function withRowContext(resource: Resource, index: number, error: ValidationError): ValidationError {
+  const fields: Record<string, string> = {};
+  for (const [field, message] of Object.entries(error.fields)) {
+    fields[field === '_' ? field : `${resource.dataKey}[${index}].${field}`] = message;
+  }
+  return new ValidationError(fields);
 }

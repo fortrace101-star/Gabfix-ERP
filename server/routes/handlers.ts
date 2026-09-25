@@ -1,38 +1,42 @@
 import type { Request, Response } from 'express';
 import { insertRecord, updateRecord } from '../repositories/records';
-import { fail, required } from '../lib/http';
+import { fail } from '../lib/http';
+import { parseBody } from '../validation/common';
+import type { Resource } from '../validation/resources';
 
-/** Everything a create handler needs to know about one resource. */
+/** Everything a create handler needs beyond the resource schema. */
 export type CreateOptions = {
   /** Primary-key prefix, e.g. `c` for customers. */
   idPrefix: string;
-  requiredFields: string[];
-  /** Fills in server-side defaults for fields the client omitted. */
-  prepare?: (body: Record<string, unknown>) => Record<string, unknown>;
-  /** Used in the fallback error message, e.g. "customer" -> "Invalid customer". */
-  label: string;
+  /** Server-side defaults applied after validation (`date`, `usage`, ...). */
+  prepare?: (data: Record<string, unknown>) => Record<string, unknown>;
 };
 
-/** POST handler that inserts a single row and answers 201 with its id. */
-export function createHandler(table: string, options: CreateOptions) {
+/**
+ * POST handler: validates the body against the resource schema (unknown fields
+ * become 422), inserts one row and answers 201 with its id.
+ */
+export function createHandler(resource: Resource, options: CreateOptions) {
   return async (req: Request, res: Response) => {
     try {
-      const body = options.prepare ? options.prepare(req.body ?? {}) : (req.body ?? {});
-      required(body, options.requiredFields);
-      const id = await insertRecord(table, body, `${options.idPrefix}${Date.now()}`);
+      const parsed = parseBody(resource.create, req.body) as Record<string, unknown>;
+      const data = options.prepare ? options.prepare(parsed) : parsed;
+      const id = await insertRecord(resource, data, `${options.idPrefix}${Date.now()}`);
       res.status(201).json({ id });
     } catch (error) {
-      fail(res, error, `Invalid ${options.label}`);
+      fail(res, error, `Invalid ${resource.label}`);
     }
   };
 }
 
-/** PATCH handler that updates a single row by id and answers 404 when unknown. */
-export function updateHandler(table: string, options: { notFound: string; label: string }) {
+/** PATCH handler: validates the patch, updates one row, 404s for an unknown id. */
+export function updateHandler(resource: Resource, options: { notFound: string; label: string }) {
   return async (req: Request, res: Response) => {
     try {
+      if (!resource.patch) throw new Error(`No update schema for ${resource.table}`);
+      const parsed = parseBody(resource.patch, req.body) as Record<string, unknown>;
       // Express 5 types a route param as string | string[]; ids are never arrays.
-      const updated = await updateRecord(table, String(req.params.id), req.body ?? {});
+      const updated = await updateRecord(resource, String(req.params.id), parsed);
       if (!updated) return res.status(404).json({ error: options.notFound });
       res.json({ ok: true });
     } catch (error) {

@@ -1,21 +1,20 @@
 import { Router } from 'express';
 import { createHandler, updateHandler } from './handlers';
+import { inventoryResource } from '../validation/resources';
+
+/** Defaults applied when the form leaves a field blank. */
+const withDefaults = (data: Record<string, unknown>) => ({
+  ...data,
+  unit: data.unit ?? 'unit',
+  quantity: data.quantity ?? 0,
+  minimum: data.minimum ?? 0,
+  cost: data.cost ?? 0,
+});
 
 export const inventoryRouter = Router();
 
-/** POST /api/inventory — stock, unit and cost default to sensible zeros. */
-inventoryRouter.post('/', createHandler('inventory_items', {
-  idPrefix: 'i',
-  requiredFields: ['name', 'category', 'branchId'],
-  prepare: (body) => ({
-    ...body,
-    unit: body.unit ?? 'unit',
-    quantity: body.quantity ?? 0,
-    minimum: body.minimum ?? 0,
-    cost: body.cost ?? 0,
-  }),
-  label: 'inventory item',
-}));
+/** POST /api/inventory */
+inventoryRouter.post('/', createHandler(inventoryResource, { idPrefix: 'i', prepare: withDefaults }));
 
-/** PATCH /api/inventory/:id — quantity, minimum, cost, unit. */
-inventoryRouter.patch('/:id', updateHandler('inventory_items', { notFound: 'Inventory item not found', label: 'inventory update' }));
+/** PATCH /api/inventory/:id — stock movements post `quantity`; other fields 422. */
+inventoryRouter.patch('/:id', updateHandler(inventoryResource, { notFound: 'Inventory item not found', label: 'inventory update' }));
