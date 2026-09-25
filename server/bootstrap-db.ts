@@ -1,11 +1,7 @@
 import 'dotenv/config';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { Client } from 'pg';
 import { seedData } from './seed-data';
-
-const here = dirname(fileURLToPath(import.meta.url));
+import { migrate } from './migrate';
 
 const connection = (database: string) => ({
   host: process.env.PGHOST || 'localhost',
@@ -16,8 +12,8 @@ const connection = (database: string) => ({
 });
 
 /**
- * Ensure the application database exists, then apply schema.sql and seed demo
- * data when empty. Safe (idempotent) to run on every server start.
+ * Ensure the application database exists, then apply pending migrations and
+ * seed demo data when empty. Safe (idempotent) to run on every server start.
  */
 export async function ensureDatabase(): Promise<void> {
   const dbName = process.env.PGDATABASE || 'gabfix';
@@ -43,9 +39,8 @@ export async function ensureDatabase(): Promise<void> {
   await client.query(`ALTER DATABASE ${JSON.stringify(dbName)} SET search_path TO public`);
   await client.query('SET search_path TO public');
 
-  const schema = readFileSync(join(here, 'schema.sql'), 'utf8');
-  await client.query(schema);
-  console.log('[db] Schema applied');
+  const applied = await migrate(client);
+  if (applied.length) console.log(`[db] Migrations applied: ${applied.join(', ')}`);
 
   const { rows } = await client.query(`SELECT COUNT(*)::int AS count FROM branches`);
   if (rows[0].count > 0) {

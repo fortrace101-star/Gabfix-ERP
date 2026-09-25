@@ -1,3 +1,9 @@
+-- 001_baseline.sql
+-- The current schema, frozen as the starting point for every environment.
+-- Copied verbatim from the former server/schema.sql at baseline commit 100d0aa.
+-- Rules for future files: NNN_snake_case.sql, one concern per file, additive only,
+-- and safe to re-run where practical (see docs/plans/enhance.md, Appendix C).
+
 CREATE TABLE IF NOT EXISTS branches (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
