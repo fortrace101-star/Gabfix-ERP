@@ -1,4 +1,30 @@
 import type { ClientBase } from 'pg';
+import bcrypt from 'bcryptjs';
+
+/**
+ * Ensures an owner employee exists, mapping to the hardcoded sidebar chip
+ * (Gabriel N. / Owner account). Runs on every bootstrap so databases seeded
+ * before identity landed still get their owner (Phase 0.4).
+ *
+ * The initial password comes from OWNER_PASSWORD (see .env.example) and is
+ * hashed here rather than in SQL. Change it after first login.
+ */
+export async function ensureOwner(client: ClientBase): Promise<void> {
+  const existing = await client.query(
+    `SELECT 1 FROM employees WHERE role = 'owner' AND deleted_at IS NULL LIMIT 1`,
+  );
+  if (existing.rows.length) return;
+
+  const password = process.env.OWNER_PASSWORD || 'gabfix-owner';
+  const pinHash = await bcrypt.hash(password, 10);
+  await client.query(
+    `INSERT INTO employees (id, name, role, phone, email, pin_hash, active)
+     VALUES ('00000000-0000-4000-8000-000000000001', 'Gabriel N.', 'owner', '', '', $1, TRUE)
+     ON CONFLICT (id) DO NOTHING`,
+    [pinHash],
+  );
+  console.log('[db] Owner employee ensured (password from OWNER_PASSWORD)');
+}
 
 /**
  * Seeds the initial Gabfix demo data — the same records the app previously shipped

@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { Client } from 'pg';
-import { seedData } from './seed-data';
+import { seedData, ensureOwner } from './seed-data';
 import { migrate } from './migrate';
 
 const connection = (database: string) => ({
@@ -49,6 +49,10 @@ export async function ensureDatabase(): Promise<void> {
     await seedData(client);
     console.log('[db] Seed data inserted');
   }
+
+  // Identity is independent of demo data: databases seeded before Phase 0.4
+  // still need their owner employee.
+  await ensureOwner(client);
 
   await client.end();
 }

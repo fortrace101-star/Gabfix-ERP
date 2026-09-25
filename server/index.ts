@@ -4,10 +4,25 @@ import cors from 'cors';
 import { pool, getData } from './db';
 import { ensureDatabase } from './bootstrap-db';
 import { seedData } from './seed-data';
+import { authRouter } from './routes/auth';
+import { guard } from './middleware/auth';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Health stays unauthenticated (also listed in PUBLIC_PATHS for the guard).
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, database: process.env.PGDATABASE || 'gabfix' });
+});
+
+// Auth endpoints manage tokens themselves (login/refresh are public, /me uses
+// requireAuth), so they mount before the staged guard.
+app.use('/api/auth', authRouter);
+
+// Staged enforcement: no-op until AUTH_ENFORCE=true (Phase 0.10 flips it once
+// the login screen ships). Destructive workspace endpoints stay owner-only.
+app.use('/api', guard());
 
 const snake = (key: string) => key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 const required = (body: Record<string, unknown>, fields: string[]) => {
@@ -59,10 +74,6 @@ const fail = (res: express.Response, error: unknown, fallback: string) => {
   if (isUniqueViolation(error)) return res.status(400).json({ error: 'A record with that number already exists' });
   return res.status(400).json({ error: error instanceof Error ? error.message : fallback });
 };
-
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, database: process.env.PGDATABASE || 'gabfix' });
-});
 
 app.get('/api/data', async (_req, res) => {
   try {
@@ -211,7 +222,7 @@ const TABLE_ORDER: [string, string][] = [
   ['inventory_items', 'inventory'],
 ];
 
-app.post('/api/import', async (req, res) => {
+app.post('/api/import', guard('owner'), async (req, res) => {
   const payload = (req.body ?? {}) as Record<string, unknown>;
   const client = await pool.connect();
   try {
@@ -244,7 +255,7 @@ app.post('/api/import', async (req, res) => {
   }
 });
 
-app.post('/api/reset', async (_req, res) => {
+app.post('/api/reset', guard('owner'), async (_req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
