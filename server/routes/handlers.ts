@@ -1,8 +1,10 @@
 import type { Request, Response } from 'express';
+import { pool } from '../db';
 import { insertRecord, updateRecord } from '../repositories/records';
 import { fail } from '../lib/http';
 import { parseBody } from '../validation/common';
-import type { Resource } from '../validation/resources';
+import type { Resource, SequenceKey } from '../validation/resources';
+import { nextNumber } from '../services/numbering';
 
 /** Everything a create handler needs beyond the resource schema. */
 export type CreateOptions = {
@@ -10,19 +12,52 @@ export type CreateOptions = {
   idPrefix: string;
   /** Server-side defaults applied after validation (`date`, `usage`, ...). */
   prepare?: (data: Record<string, unknown>) => Record<string, unknown>;
+  /**
+   * When set, the handler claims a server-side document number (via
+   * `document_sequences`) inside the same transaction as the row insert, so
+   * concurrent creates never collide. The claimed number is stored in
+   * `number` when the client did not supply one.
+   */
+  sequenceKey?: SequenceKey;
 };
 
 /**
  * POST handler: validates the body against the resource schema (unknown fields
  * become 422), inserts one row and answers 201 with its id.
+ *
+ * When `sequenceKey` is set the insert runs inside a transaction so the
+ * document number is claimed atomically — the client no longer generates
+ * `JOB-NNNNN` itself.
  */
 export function createHandler(resource: Resource, options: CreateOptions) {
   return async (req: Request, res: Response) => {
     try {
       const parsed = parseBody(resource.create, req.body) as Record<string, unknown>;
       const data = options.prepare ? options.prepare(parsed) : parsed;
-      const id = await insertRecord(resource, data, `${options.idPrefix}${Date.now()}`);
-      res.status(201).json({ id });
+      const id = `${options.idPrefix}${Date.now()}`;
+
+      if (options.sequenceKey) {
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          if (!data.number) {
+            data.number = await nextNumber(client, options.sequenceKey);
+          }
+          await insertRecord(resource, data, id, client);
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      } else {
+        await insertRecord(resource, data, id);
+      }
+
+      const body: { id: string; number?: string } = { id };
+      if (data.number) body.number = data.number as string;
+      res.status(201).json(body);
     } catch (error) {
       fail(res, error, `Invalid ${resource.label}`);
     }

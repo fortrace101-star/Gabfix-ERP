@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { SequenceKey } from '../services/numbering';
 import {
   dateText,
   idText,
@@ -10,6 +11,8 @@ import {
   optionalTextList,
   text,
 } from './common';
+
+export type { SequenceKey } from '../services/numbering';
 
 /**
  * One resource per stored table (Phase 0.7).
@@ -121,7 +124,7 @@ export const servicesResource: Resource = {
  * jobs — the operational core: numbering, dates, money and the equipment log.
  */
 const jobCreate = z.strictObject({
-  number: text,
+  number: text.optional(),
   customerId: idText,
   branchId: idText,
   serviceId: idText,
