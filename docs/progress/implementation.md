@@ -6,7 +6,7 @@
 | Requirements | [`docs/requirements.md`](../requirements.md) |
 | Baseline commit | `100d0aa` (Pre-refactor baseline snapshot before enhancement work) |
 | Started | 2026-09-25 |
-| Status | Phase 0a complete · Phase 0b complete · Phase 0c in progress (0c.1 + 0c.2a/b/d/e done: identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, SSE, tests+CI; §0.10 admin client split remaining) |
+| Status | Phase 0a complete · Phase 0b complete · **Phase 0c complete** (identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, client split, SSE, tests+CI) · Phase 1 next |
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -20,7 +20,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | --- | --- | --- | --- |
 | Phase 0a | Multi-app scaffold | Rename `client/` → `gabfix-administrator`; scaffold 3 new Vite+React 18 apps; per-app configs; root dev scripts; ports 5173–5176 | ✅ done |
 | **Phase 0b** | **Theme, components & PWA shells** | **Vendored theme tokens; `useTheme` hook; `StatusBadge` component; PWA manifests + sw; `.env` with `VITE_APP_ID`** | **✅ done** |
-| Phase 0c | Backend multi-app wiring | `005_multiapp_identity` + `006_remove_branches` + `sync_tables` migrations; server identity/roles scoped to 4 apps; §0.9 dates, §0.10 client split, §0.11 SSE, §0.12 CI completion | 🔄 0c.1 + 0c.2a/b/d/e done (branches removed, Kampala dates, SSE, tests+CI) · §0.10 client split remaining |
+| Phase 0c | Backend multi-app wiring | `005_multiapp_identity` + `006_remove_branches` + `sync_tables` migrations; server identity/roles scoped to 4 apps; §0.9 dates, §0.10 client split, §0.11 SSE, §0.12 CI completion | ✅ done — 0c.1 + 0c.2a/b/c/d/e complete |
 | Phase 1 | Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | — |
 | Phase 2 | PDF & documents | jsPDF + AutoTable, 14 document types, print/download/attach | — |
 | Phase 3 | Notifications, feedback, real-time | WhatsApp/SMS, completion message, feedback form, SSE | — |
@@ -29,7 +29,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | Phase 6 | Real-time upgrade | Socket.IO chat, Inbox, presence, live map | — |
 | Phase 7 | Depth | Payment gateway + reconciliation, scheduled reports, dunning | — |
 
-> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c 🔄 (0c.1 + 0c.2a/b/d/e done — see Phase 0c section; §0.10 admin client split remains). Phases 0.1–0.8 (baseline, migrations, identity, auth, handler split, zod, numbering) are also complete from prior work.
+> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 (data spine) is next.**
 
 ---
 
@@ -50,7 +50,7 @@ SSE, CI. **No later phase can be built safely before this.**
 | 0.7 | Per-route zod schemas replacing the generic column map (`server/validation/*`) | [x] | Unknown fields return 422 instead of silent drop. Replaced unsafe `z.coerce.number()` with `z.preprocess()` so null and empty string fail cleanly; validated backup import with array index paths; live 44-probe check verified. |
 | 0.8 | Server-side document numbering (`services/numbering.ts`) | [x] | `004_numbering.sql` creates `document_sequences` with JOB/INV/LDY seeds (next values 145/99/217, above seed-data maxima); `nextNumber()` does `UPDATE ... RETURNING` inside the caller's transaction; `createHandler` now accepts a `sequenceKey` option that wraps the insert in BEGIN/COMMIT so concurrent creates can never collide; jobs route passes `sequenceKey: 'job'`; `number` made optional in `jobCreate` schema; client `JobForm` no longer sends a client-generated number. Verified: single create returns JOB-00145; 10 concurrent creates yield 10 unique numbers JOB-00147…JOB-00156; client-supplied numbers still accepted (backward compat); server typecheck green; client build clean |
 | 0.9 | Africa/Kampala date handling (`client/src/lib/dates.ts`, `server/lib/dates.ts`) | [x] | `server/lib/dates.ts` (`kampalaToday`/`addDays`/`isMaintenanceDue`, injectable clock for tests) + admin mirror `src/lib/dates.ts` (`todayISO`/`addDays`/`isMaintenanceDue`/`periodStart`); expense/equipment routes default and compare on Kampala local days; App.tsx `getStartDate` delegates and an `isDue` helper drives maintenance flags, nav badges and dashboard alerts |
-| 0.10 | Client split (app/features/components/lib) + router + query cache | [ ] | UI identical, deep links work, `App.tsx` under 150 lines, build/lint/typecheck pass |
+| 0.10 | Client split (app/features/components/lib) + router + query cache | [x] | `App.tsx` down from 641 to 92 lines; `src/app/` (store.tsx workspace context + react-query, realtime.ts SSE hook, layout/{Sidebar,Topbar}), `src/features/` ×9 views incl. modals, `src/lib/{money,csv,format,profile}.ts`, `src/components/ui.tsx`; react-router-dom 7.18.4 deep links (`/jobs`, `/reports`, …) + `@tanstack/react-query` 5.104.0 workspace cache driving the SSE invalidations |
 | 0.11 | Scoped/paginated endpoints + SSE event bus (`routes/events.ts`, `services/realtime.ts`) | [x] | Realtime pub/sub (throwing subscribers isolated, 15s heartbeat) + `GET /api/events` (all four scopes, staged enforcement); `job-created`/`*-updated` published post-response, `workspace-reset` on import/reset; admin EventSource auto-reconnects with a 30s fallback refresh. Live probe: job POST streamed `event: job-created` (server issued JOB-00146) |
 | 0.12 | Tests + CI (`server/test/*`, client tests, `.github/workflows/ci.yml`) | [x] | 17-test node:test suite 17/17 (dates rollover, validation 422s, app_scope JWTs + requireScope, realtime bus); CI: server job on postgres:16 (typecheck, tests, fresh-db migrate 001→007, branchless assertion, API smoke) + apps job (typecheck+build ×4, lint 3 scaffold apps). Numbering/ledger/depreciation coverage lands with Phase 1 |
 
@@ -262,11 +262,30 @@ Probe methodology note: routers expose POST/PATCH only (reads via `/api/data`), 
 | Admin `npm run lint` | ✅ 20 pre-existing errors (baseline 21, no new) |
 | Admin `npm run build` | ✅ vite build + PWA v0.21.2 green (`dist/sw.js` generated) |
 
-### 0c.2 remainder — §0.10 (next)
+### 0c.2c — §0.10 admin client split ✅ (completes Phase 0c)
 
-| Step | Work | Status |
-| --- | --- | --- |
-| 0c.2c | §0.10 admin client split (app/features/components/lib) + router + query cache | [ ] |
+| Step | Work | Status | Notes |
+| --- | --- | --- | --- |
+| 0c.2c-1 | Dependencies: `react-router-dom@7.18.4` + `@tanstack/react-query@5.104.0` added to the admin app | [x] | Router for deep links; query cache for server state (plan §10 concerns table) |
+| 0c.2c-2 | `src/app/`: `store.tsx` (WorkspaceProvider: react-query `['workspace']` cache + context for view/modal/query/toast/profile, `refresh` = cache invalidation), `realtime.ts` (SSE → cache invalidation hook, replaces the App.tsx EventSource effect), `layout/{Sidebar,Topbar}.tsx` (nav with badges; global ⌘K search + alerts panel) | [x] | Views now read state from context instead of 8–15 prop drills |
+| 0c.2c-3 | `src/features/`: `dashboard.tsx`, `jobs.tsx` (+ shared JobTable), `customers.tsx`, `finance.tsx`, `laundry.tsx`, `assets.tsx` (equipment + inventory), `reports.tsx`, `settings.tsx` (now owns backup import/export/reset), `modals.tsx` (ModalShell + 9 dialogs) | [x] | Markup copied verbatim — rendered UI unchanged |
+| 0c.2c-4 | `src/lib/` additions: `money.ts` (setCurrency/money/plain), `csv.ts` (toCsv/exportCsv/downloadCsv), `format.ts` (monthKeyOf/monthName), `profile.ts` (localStorage profile); `src/components/ui.tsx` (PageHeader, Button, EmptyState, MiniStat, SelectFilter, QuickAction, KpiCard, AlertRow, ReportCard, CsvTable, RankedList) | [x] | Pre-existing 20 lint errors lived in the old monolith and are gone; baseline now 0 errors |
+| 0c.2c-5 | New `App.tsx`: QueryClientProvider → WorkspaceProvider → BrowserRouter with a catch-all shell route; URL ↔ view sync makes every view deep-linkable (`/dashboard`…`/settings`) | [x] | 92 lines (acceptance: < 150) |
+
+### 0c.2c Verification matrix
+
+| Check | Result |
+| --- | --- |
+| Admin typecheck | ✅ 0 errors (initial `unknown &&` JSX issue in modals fixed) |
+| Admin lint | ✅ **0 errors** (was 20 pre-existing baseline — all removed with the monolith; 3 acceptable `react-refresh/only-export-components` warnings) |
+| Admin build | ✅ vite build + PWA v0.21.2 green |
+| Deep links on the live dev server | ✅ all 9 view paths + root return 200; every extracted module transforms via vite (no 500s) |
+| `App.tsx` size | ✅ 92 lines < 150 acceptance |
+| Root typecheck (4 apps + server) | ✅ 0 errors |
+| Server tests after the split | ✅ 17/17 |
+| Stack boot/shutdown via `scripts/dev.mjs` | ✅ 4 vite instances + API on :5000; all ports freed after shutdown |
+
+> Structural note: the plan's `types/` per-domain split and `features/<domain>/` folders land as later phases add those domains; this split keeps the existing domain list (jobs, customers, finance, laundry, assets, reports, settings) in feature files, matching today's UI surface.
 
 ---
 
@@ -276,7 +295,7 @@ Probe methodology note: routers expose POST/PATCH only (reads via `/api/data`), 
 | --- | --- | --- | --- |
 | 0a. Multi-app scaffold | 4 apps (admin + 3 new) + root scripts + per-app configs + ports | 2–3 d | [x] |
 | 0b. Theme, components & PWA shells | Vendored tokens + useTheme + StatusBadge + PWA manifests | 1–2 d | [x] |
-| 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; branches removed; §0.9/§0.11/§0.12 done | 3–5 d | [~] 0c.1 + 0c.2a/b/d/e done · §0.10 remains |
+| 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; branches removed; §0.9/§0.10/§0.11/§0.12 all done | 3–5 d | [x] |
 | 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [ ] |
 | 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [ ] |
 | 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [ ] |
@@ -320,6 +339,8 @@ Probe methodology note: routers expose POST/PATCH only (reads via `/api/data`), 
 | 2026-09-27 | Phase 0c.2d done (§0.11): realtime pub/sub service + `GET /api/events` SSE route (all scopes, staged enforcement), `job-created`/`*-updated`/`workspace-reset` publishes, admin EventSource with reconnect + 30s fallback refresh. Live acceptance probe: job POST streamed `event: job-created` (JOB-00146 issued, probe row deleted); two earlier 404s traced to a stale nodemon serving old code, not a missing route |
 | 2026-09-27 | Phase 0c.2e done (§0.12): 17-test node:test suite (dates, validation, auth/scopes, realtime bus) — 17/17 pass; `.github/workflows/ci.yml` (server job: postgres:16, fresh-db migrate 001→007, branchless assertion, API smoke; apps job: typecheck+build ×4, lint ×3); root `npm test`; `.gitignore` += `*.timestamp-*.mjs`; test-file typecheck fixed |
 | 2026-09-27 | API port moved 4000 → 5000 (user request): server default `PORT` fallback, all 4 vite proxies, CI health-check URL, `server/.env.example`, README; `server/.env` already updated by hand. Seed UUIDs containing "4000" and the SSE 4s reconnect delay were left untouched (not port references). Probe note: ports 5173/5174/4000 were occupied by another project's dev servers — killed with permission before booting |
+| 2026-09-27 | Smoke test of the full stack after the port move: all 4 apps served their titles on 5173–5176, `/api/health` green through the 5173 proxy, SSE streamed through the proxy, `scripts/dev.mjs` shutdown freed every port. Also cleared two duplicate nodemon→tsx chains that were fighting over :5000 |
+| 2026-09-27 | Phase 0c.2c done (§0.10) — **Phase 0c complete**: admin client split into `app/` (store.tsx react-query context, realtime.ts SSE hook, layout/Sidebar+Topbar), `features/` (9 views incl. modals), `lib/` (money, csv, format, profile), `components/ui.tsx`; react-router-dom deep links + @tanstack/react-query cache; `App.tsx` 641 → 92 lines; lint baseline 20 → 0 errors. Verified: typecheck 0, build + PWA green, 9 deep links 200 on the live server, root typecheck 0, server tests 17/17 |
 
 
 

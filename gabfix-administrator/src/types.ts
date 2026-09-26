@@ -11,3 +11,6 @@ export type LaundryOrder = { id: string; number: string; customerId: string; sta
 export type Equipment = { id: string; name: string; serialNumber: string; type: string; value: number; bookValue: number; condition: string; nextMaintenance: string; usage: number };
 export type InventoryItem = { id: string; name: string; category: string; unit: string; quantity: number; minimum: number; cost: number };
 export type AppData = { customers: Customer[]; services: Service[]; jobs: Job[]; invoices: Invoice[]; expenses: Expense[]; laundry: LaundryOrder[]; equipment: Equipment[]; inventory: InventoryItem[] };
+
+/** Workspace identity edited in Settings → Company profile, persisted per browser. */
+export type WorkspaceProfile = { companyName: string; tagline: string; phone: string; address: string; currency: string; basis: string; logo: string };
