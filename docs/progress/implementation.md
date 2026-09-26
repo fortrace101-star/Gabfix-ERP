@@ -12,6 +12,27 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
 ---
 
+## Overall Plan Progress
+
+The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the multi-app foundation that unlocks everything else. It is subdivided into:
+
+| Sub-phase | Name | Scope | Status |
+| --- | --- | --- | --- |
+| Phase 0a | Multi-app scaffold | Rename `client/` → `gabfix-administrator`; scaffold 3 new Vite+React 18 apps; per-app configs; root dev scripts; ports 5173–5176 | ✅ done |
+| **Phase 0b** | **Theme, components & PWA shells** | **Vendored theme tokens; `useTheme` hook; `StatusBadge` component; PWA manifests + sw; `.env` with `VITE_APP_ID`** | **✅ done** |
+| Phase 0c | Backend multi-app wiring | `005_multiapp_identity` + `006_remove_branches` + `sync_tables` migrations; server identity/roles scoped to 4 apps; §0.9 dates, §0.10 client split, §0.11 SSE, §0.12 CI completion | ⏳ next |
+| Phase 1 | Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | — |
+| Phase 2 | PDF & documents | jsPDF + AutoTable, 14 document types, print/download/attach | — |
+| Phase 3 | Notifications, feedback, real-time | WhatsApp/SMS, completion message, feedback form, SSE | — |
+| Phase 4 | Field operations | Employees, devices, assignments, beacon, map, geofences | — |
+| Phase 5 | Sales & manager dashboard | Attribution, pipeline, commissions, dashboards | — |
+| Phase 6 | Real-time upgrade | Socket.IO chat, Inbox, presence, live map | — |
+| Phase 7 | Depth | Payment gateway + reconciliation, scheduled reports, dunning | — |
+
+> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c is next. Phases 0.1–0.8 (baseline, migrations, identity, auth, handler split, zod, numbering) are also complete from prior work; §0.9–§0.12 remain pending and will land in Phase 0c.
+
+---
+
 ## Phase 0 — Foundations (6–9 dev-days)
 
 Goal: make change safe — migration runner, identity and roles, server route split,
@@ -63,7 +84,7 @@ Goal: Establish the independent Vite+React 18 app structure for all four service
 | `gabfix-inhouse-erp/` | `gabfix-inhouse-erp`² | `portal` | 5175 | Online-first, PWA, tiny beacon outbox |
 | `gabfix-store/` | `gabfix-store` | `store` | 5176 | Online-first, full PWA |
 
-> ² Plan §2 names the folder `inhouse-employee-client/` and the package `inhouse-employee-client`; the scaffolded folder and package are `gabfix-inhouse-erp/` (consistent kebab-case `gabfix-*` prefix across all apps). `VITE_APP_ID` values from the plan are not yet set as env vars in the apps — left for Phase 0b.
+> ² Plan §2 names the folder `inhouse-employee-client/` and the package `inhouse-employee-client`; the scaffolded folder and package are `gabfix-inhouse-erp/` (consistent kebab-case `gabfix-*` prefix across all apps). `VITE_APP_ID` values from the plan are set as env vars in the apps — added in Phase 0b (see App Registry §0b above).
 
 ### Post-scaffold fixes
 
