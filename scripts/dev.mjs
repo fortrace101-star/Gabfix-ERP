@@ -1,12 +1,15 @@
-// Runs the admin app (Vite) and server (Express) dev processes concurrently.
-// No dependencies: spawns both with npm and prefixes their output.
+// Runs the API server + all four Vite+React dev servers concurrently.
+// Usage: npm run dev  (or: node scripts/dev.mjs)
 import { spawn } from 'node:child_process';
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 const procs = [
   { name: 'server', args: ['--prefix', 'server', 'run', 'dev'] },
-  { name: 'admin', args: ['--prefix', 'gabfix-administrator', 'run', 'dev'] },
+  { name: 'admin',  args: ['--prefix', 'gabfix-administrator', 'run', 'dev'] },
+  { name: 'laundry', args: ['--prefix', 'gabfix-laundry-front-office', 'run', 'dev'] },
+  { name: 'portal',  args: ['--prefix', 'gabfix-inhouse-erp', 'run', 'dev'] },
+  { name: 'store',   args: ['--prefix', 'gabfix-store', 'run', 'dev'] },
 ].map(({ name, args }) => {
   const child = spawn(npm, args, { shell: true, env: process.env });
 

@@ -1,9 +1,9 @@
-import { defineConfig } from 'vite';
+import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath, URL } from 'node:url';
 
 // PWA plugin is optional during scaffold — install with `npm install` to enable.
-let pwaPlugin: any = [];
+let pwaPlugin: Plugin[] = [];
 try {
   const { VitePWA } = await import('vite-plugin-pwa');
   pwaPlugin = [VitePWA({
@@ -18,7 +18,7 @@ try {
       icons: [
         { src: '/icons/logo-192.png', sizes: '192x192', type: 'image/png' },
         { src: '/icons/logo-512.png', sizes: '512x512', type: 'image/png' },
-      ],
+  ],
     },
     workbox: {
       cleanupOutdatedCaches: true,
@@ -45,6 +45,8 @@ export default defineConfig({
     ...pwaPlugin,
   ],
   server: {
+    port: 5174,
+    strictPort: true,
     proxy: {
       '/api': 'http://localhost:4000',
     },
