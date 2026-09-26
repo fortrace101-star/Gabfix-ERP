@@ -1,10 +1,49 @@
-import { defineConfig } from 'vite';
+import { defineConfig, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath, URL } from 'node:url';
 
+// PWA plugin is optional during scaffold — install with `npm install` to enable.
+let pwaPlugin: Plugin[] = [];
+try {
+  const { VitePWA } = await import('vite-plugin-pwa');
+  pwaPlugin = [VitePWA({
+    registerType: 'autoUpdate',
+    manifest: {
+      name: 'Gabfix ERP',
+      short_name: 'Gabfix ERP',
+      description: 'Gabfix ERP Management System',
+      display: 'standalone',
+      background_color: '#f5f7f5',
+      theme_color: '#147d57',
+      icons: [
+        { src: '/logo.png', sizes: '192x192', type: 'image/png' },
+        { src: '/logo.png', sizes: '512x512', type: 'image/png' },
+      ],
+    },
+    workbox: {
+      cleanupOutdatedCaches: true,
+      runtimeCaching: [
+        {
+          urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+          handler: 'NetworkFirst',
+          options: {
+            cacheName: 'api-cache',
+            expiration: { maxAgeSeconds: 300 },
+          },
+        },
+      ],
+    },
+  })];
+} catch {
+  console.warn('[vite] vite-plugin-pwa not installed — PWA features disabled');
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    ...pwaPlugin,
+  ],
   server: {
     port: 5173,
     strictPort: true,

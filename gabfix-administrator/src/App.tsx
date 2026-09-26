@@ -5,6 +5,8 @@ import {
 import gabfixLogo from './assets/gabfix-logo.png';
 import * as api from './api';
 import type { AppData, Customer, Equipment, InventoryItem, Job, JobStatus, LaundryOrder, Modal, View } from './types';
+import StatusBadge from '@/components/StatusBadge';
+import { useTheme } from '@/hooks/useTheme';
 
 /** Currency code used by every money() call. The Settings profile updates this at runtime. */
 let activeCurrency = 'UGX';
@@ -108,6 +110,7 @@ const navGroups = [
 ];
 
 function App() {
+  useTheme();
   const [data, setData] = useState<AppData>(emptyData);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -237,7 +240,7 @@ function App() {
 
 function PageHeader({ eyebrow, title, description, action, children }: { eyebrow?: string; title: string; description?: string; action?: ReactNode; children?: ReactNode }) { return <div className="page-header"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1>{description && <p>{description}</p>}</div><div className="header-actions">{children}{action}</div></div>; }
 function Button({ children, onClick, variant = 'primary', icon, disabled }: { children: ReactNode; onClick?: () => void; variant?: 'primary' | 'secondary' | 'ghost'; icon?: ReactNode; disabled?: boolean }) { return <button className={`button ${variant}`} onClick={onClick} disabled={disabled}>{icon}{children}</button>; }
-function StatusBadge({ value }: { value: string }) { const v = value.toLowerCase(); const tone = (v.includes('paid') && !v.includes('unpaid')) || value === 'Completed' || value === 'Ready' || value === 'Good' ? 'success' : v.includes('overdue') || v.includes('due') || value === 'Cancelled' || v.includes('unpaid') ? 'danger' : value === 'In Progress' || value === 'Washing' || value === 'Drying' ? 'info' : 'warning'; return <span className={`status ${tone}`}><i />{value}</span>; }
+// StatusBadge is now imported from src/components/StatusBadge.tsx (Phase 0b)
 function EmptyState({ title = 'Nothing here yet', description = 'Create a record to start building your workspace.' }: { title?: string; description?: string }) { return <div className="empty-state"><div className="empty-icon"><ClipboardList size={22} /></div><strong>{title}</strong><span>{description}</span></div>; }
 
 function Dashboard({ data, branch, period, setPeriod, revenue, expenses, receivables, setView, setModal, setModalData }: { data: AppData; branch: string; period: string; setPeriod: (value: string) => void; revenue: number; expenses: number; receivables: number; activeJobs: number; setView: (view: View) => void; setModal: (modal: Modal) => void; setModalData: (data: any) => void }) {

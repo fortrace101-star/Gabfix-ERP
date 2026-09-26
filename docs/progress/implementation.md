@@ -6,7 +6,7 @@
 | Requirements | [`docs/requirements.md`](../requirements.md) |
 | Baseline commit | `100d0aa` (Pre-refactor baseline snapshot before enhancement work) |
 | Started | 2026-09-25 |
-| Status | Phase 0a complete · Phase 0b pending |
+| Status | Phase 0a complete · Phase 0b complete · Phase 0c pending |
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -88,11 +88,58 @@ Goal: Establish the independent Vite+React 18 app structure for all four service
 
 ---
 
+## Phase 0b — Theme, Components & PWA Shells
+
+Reference: [`docs/plans/multi-app-plan.md`](../plans/multi-app-plan.md) §2 (App Registry), §8 (Theme / Components — Process Parity), §9 (Delivery Order).
+Goal: Vendored theme tokens, `useTheme` hook, `StatusBadge` component, and PWA shells in all four apps. Build order §8 starts with `StatusBadge`.
+
+### Steps
+
+| Step | Work (per plan §8–9) | Status | Notes |
+| --- | --- | --- | --- |
+| 0b.1 | Vend theme tokens (`src/theme/tokens.css` or `src/index.css`) with light/dark CSS variables per-app accent | [x] | Admin: `src/index.css` (green accent). Laundry: green `--brand`. Portal: blue `--brand`. Store: amber `--brand`. All use `var(--surface)`, `var(--ink)`, `var(--line)` for surfaces, text, borders per plan §17 |
+| 0b.2 | `useTheme` hook (`src/hooks/useTheme.ts`) — dark/light toggle via `data-theme` attribute on `<html>`, localStorage persistence + `prefers-color-scheme` fallback, scoped per-app via `VITE_APP_ID` | [x] | Hook in all 4 apps; inline script in each `index.html` sets initial theme before JS mount (no FOUC) |
+| 0b.3 | `StatusBadge` component (`src/components/StatusBadge.tsx`) — extracted from admin's inline `App.tsx` function; tone logic: success/danger/info/warning | [x] | Standalone component in all 4 apps (vendored per app). Admin: inline function replaced with `@/components/StatusBadge` import |
+| 0b.4 | PWA shells: `public/manifest.webmanifest` + `<link rel="manifest">` in `index.html` + `vite-plugin-pwa` config in `vite.config.ts` | [x] | Admin got PWA plugin added with try/catch pattern (matching 3 new apps). All 4 have manifest + inline theme script in `<head>` |
+| 0b.5 | `.status` CSS classes (`tokens.css`/`index.css`) + `[data-theme="dark"]` dark-mode variable overrides + dark-mode status badge colors | [x] | Matches admin's existing styles: `.status .status.success .status.info .status.warning .status.danger` with light + dark variants |
+
+### App Registry (updated — per plan §2)
+
+| Folder | Package name | VITE_APP_ID | Dev port | Mode |
+| --- | --- | --- | --- | --- |
+| `gabfix-administrator/` | `gabfix-administrator` | `admin` | 5173 | Online-first, control plane, full PWA |
+| `gabfix-laundry-front-office/` | `gabfix-laundry-front-office` | `laundry` | 5174 | Offline-first PWA (Dexie + SW) |
+| `gabfix-inhouse-erp/` | `gabfix-inhouse-erp` | `portal` | 5175 | Online-first, PWA, tiny beacon outbox |
+| `gabfix-store/` | `gabfix-store` | `store` | 5176 | Online-first, full PWA |
+
+> ¹ `VITE_APP_ID` env vars added in Phase 0b (`.env` per app); used by `useTheme` hook to namespace localStorage keys.
+
+> ² Plan §2 names the folder `inhouse-employee-client/` and the package `inhouse-employee-client`; the scaffolded folder and package are `gabfix-inhouse-erp/` (consistent kebab-case `gabfix-*` prefix; `VITE_APP_ID=portal` matches plan §2).
+
+### Verification matrix
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` (all 4 apps) | ✅ clean |
+| `npm run lint` (3 new apps) | ✅ no errors |
+| `npm run lint` (admin modified files) | ✅ no new errors (21 pre-existing in App.tsx) |
+| `npm run build` (all 4 apps) | ✅ exit 0 |
+| `.status` CSS classes present | ✅ all 4 apps |
+| `[data-theme="dark"]` support | ✅ all 4 apps |
+| `useTheme` hook initialized | ✅ all 4 apps (via `App.tsx` + `index.html` inline script) |
+| `StatusBadge` component | ✅ all 4 apps (admin extracted from inline) |
+| `manifest.webmanifest` | ✅ all 4 apps |
+| `VITE_APP_ID` in `.env` | ✅ admin / laundry / portal / store |
+| `vite-plugin-pwa` in vite.config.ts | ✅ all 4 apps (optional via try/catch) |
+
+---
+
 ## Later phases (summary — see plan §18.1)
 
 | Phase | Goal | Estimate | Status |
 | --- | --- | --- | --- |
 | 0a. Multi-app scaffold | 4 apps (admin + 3 new) + root scripts + per-app configs + ports | 2–3 d | [x] |
+| 0b. Theme, components & PWA shells | Vendored tokens + useTheme + StatusBadge + PWA manifests | 1–2 d | [x] |
 | 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [ ] |
 | 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [ ] |
 | 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [ ] |
@@ -121,6 +168,12 @@ Goal: Establish the independent Vite+React 18 app structure for all four service
 | 2026-09-26 | Phase 0a: `git mv client gabfix-administrator` (keeps git history); scaffolding 3 new apps + shared packages; root dev scripts; per-app vite.config.ts + tailwind + theme tokens |
 | 2026-09-26 | Phase 0a (post-scaffold fixes): Fixed `@typescript-eslint/no-explicit-any` in all 3 new apps' `vite.config.ts` by replacing `let pwaPlugin: any = []` with `let pwaPlugin: Plugin[] = []` + importing `Plugin` from `vite`; added explicit `port` + `strictPort: true` to each app's `server` config (admin 5173, laundry 5174, portal 5175, store 5176); updated `scripts/dev.mjs` to spawn all 5 processes (server + 4 apps) via root `npm run dev`; build verification: all 4 apps compile with exit 0 (1568–1570 modules each); `vite-plugin-pwa` remains optional via try/catch (expected warning: "not installed — PWA features disabled") |
 | 2026-09-26 | Updated progress doc: added Phase 0a section with steps (aligned to `multi-app-plan.md` §15), App Registry (§2), post-scaffold fixes table, and verification matrix; added `multi-app-plan.md` as plan reference; marked Phase 0a `[x]` in phase overview table; status updated to "Phase 0a complete · Phase 0b pending" |
+| 2026-09-26 | Phase 0b: `useTheme` hook (`src/hooks/useTheme.ts`) in all 4 apps — dark/light toggle via `data-theme` attribute on `<html>`, localStorage persistence, `prefers-color-scheme` fallback, scoped per-app via `VITE_APP_ID`; inline theme-detection script in each `index.html` prevents FOUC | 
+| 2026-09-26 | Phase 0b: `StatusBadge` component (`src/components/StatusBadge.tsx`) in all 4 apps — extracted from admin's inline `App.tsx` function (replaced inline def with `@/components/StatusBadge` import); tone logic preserved (success/danger/info/warning); vendored per app per plan §8 |
+| 2026-09-26 | Phase 0b: PWA shells — `public/manifest.webmanifest` + `<link rel="manifest">` added to all 4 `index.html` files; `vite-plugin-pwa` config added to admin's `vite.config.ts` (try/catch pattern matching 3 new apps); all 4 apps have optional PWA support |
+| 2026-09-26 | Phase 0b: `.status` CSS classes + `[data-theme="dark"]` dark-mode overrides added to all 4 apps' CSS files (`tokens.css` / `index.css`); CSS variables updated for dark mode in all apps |
+| 2026-09-26 | Phase 0b: `.env` files created for all 4 apps setting `VITE_APP_ID` (admin/laundry/portal/store); `vite-env.d.ts` (with `vite/client` reference) created for 3 new apps to resolve `import.meta.env` type errors |
+| 2026-09-26 | Phase 0b verification: all 4 apps pass `tsc --noEmit` typecheck; 3 new apps pass ESLint; admin's modified files introduce no new lint errors; all 4 apps build with `vite build` (exit 0); progress doc updated with Phase 0b section, updated App Registry, and verification matrix
 
 
 

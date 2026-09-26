@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <title>Gabfix Portal</title>
     <meta property="og:title" content="Gabfix Portal" />
     <meta property="og:description" content="Field technician app" />
@@ -11,6 +12,14 @@
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Gabfix Portal" />
     <meta name="twitter:image" content="/logo.png" />
+    <script>
+      try {
+        var saved = localStorage.getItem('gabfix-theme-portal');
+        var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.style.colorScheme = theme;
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
