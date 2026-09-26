@@ -9,6 +9,7 @@
     "start": "tsx index.ts",
     "db:init": "tsx init-db.ts",
     "db:migrate": "tsx migrate.ts",
+    "test": "node --import tsx --test test/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
@@ -16,7 +17,6 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "gabfix-erp": "file:..",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.23.0",
     "zod": "^4.6.5"

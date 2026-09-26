@@ -1,0 +1,100 @@
+# CI (Phase 0.12, plan section 8.10): green pipeline gating dates, identity,
+# numbering and validation. The server job validates every migration against a
+# real PostgreSQL 16 and runs the unit suite; the apps job typechecks and
+# builds all four apps so a broken deploy can never merge.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  server:
+    name: Server (migrations + tests)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: gabfix_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: gabfix_ci
+      JWT_SECRET: ci-test-secret
+      OWNER_PASSWORD: ci-owner-password
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install server dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: server
+        run: npm run typecheck
+
+      - name: Unit tests (dates, validation, auth/scopes, realtime bus)
+        working-directory: server
+        run: npm test
+
+      - name: Fresh-database bootstrap (creates DB, runs migrations 001-007, seeds)
+        run: npm --prefix server run db:migrate
+
+      - name: Confirm schema is branchless (single shop, plan decision #9)
+        working-directory: server
+        run: |
+          npx tsx -e "import('dotenv/config').then(async () => { const { pool } = await import('./db'); const b = await pool.query(\"SELECT to_regclass('public.branches') IS NOT NULL AS present\"); const c = await pool.query(\"SELECT count(*)::int AS n FROM information_schema.columns WHERE table_name IN ('jobs','expenses','equipment','inventory_items','employees') AND column_name = 'branch_id'\"); console.log('branches present:', b.rows[0].present, '| branch_id cols:', c.rows[0].n); await pool.end(); if (b.rows[0].present || c.rows[0].n !== 0) process.exit(1); })"
+
+      - name: Smoke-test the API boots
+        run: |
+          cd server
+          (npx tsx index.ts &) 
+          for i in $(seq 1 30); do curl -sf http://localhost:5000/api/health && break; sleep 1; done
+          curl -sf http://localhost:5000/api/health > /dev/null
+          echo "API healthy"
+
+  apps:
+    name: Apps (typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install + typecheck + build (all four apps)
+        run: |
+          for app in gabfix-administrator gabfix-laundry-front-office gabfix-inhouse-erp gabfix-store; do
+            echo "=== $app ==="
+            npm --prefix "$app" ci
+            npm --prefix "$app" run typecheck
+            npm --prefix "$app" run build
+          done
+
+      - name: Lint the three scaffold apps
+        run: |
+          for app in gabfix-laundry-front-office gabfix-inhouse-erp gabfix-store; do
+            npm --prefix "$app" run lint
+          done

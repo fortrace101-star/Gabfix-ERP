@@ -18,6 +18,7 @@
     "dev:server": "npm --prefix server run dev",
     "db:init": "npm --prefix server run db:init",
     "db:migrate": "npm --prefix server run db:migrate",
+    "test": "npm --prefix server run test",
     "build": "npm --prefix gabfix-administrator run build && npm --prefix gabfix-laundry-front-office run build && npm --prefix gabfix-inhouse-erp run build && npm --prefix gabfix-store run build",
     "lint": "npm --prefix gabfix-administrator run lint && npm --prefix gabfix-laundry-front-office run lint && npm --prefix gabfix-inhouse-erp run lint && npm --prefix gabfix-store run lint",
     "typecheck": "npm --prefix gabfix-administrator run typecheck && npm --prefix gabfix-laundry-front-office run typecheck && npm --prefix gabfix-inhouse-erp run typecheck && npm --prefix gabfix-store run typecheck && npm --prefix server run typecheck"

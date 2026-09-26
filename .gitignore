@@ -21,3 +21,6 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Vite 5/6 temp config artifacts
+*.timestamp-*.mjs

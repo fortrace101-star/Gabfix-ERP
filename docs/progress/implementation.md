@@ -6,7 +6,7 @@
 | Requirements | [`docs/requirements.md`](../requirements.md) |
 | Baseline commit | `100d0aa` (Pre-refactor baseline snapshot before enhancement work) |
 | Started | 2026-09-25 |
-| Status | Phase 0a complete · Phase 0b complete · Phase 0c in progress (0c.1 + 0c.2a done: identity scopes, sync tables, auth/CORS, branches removed; §0.9–0.12 remaining) |
+| Status | Phase 0a complete · Phase 0b complete · Phase 0c in progress (0c.1 + 0c.2a/b/d/e done: identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, SSE, tests+CI; §0.10 admin client split remaining) |
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -20,7 +20,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | --- | --- | --- | --- |
 | Phase 0a | Multi-app scaffold | Rename `client/` → `gabfix-administrator`; scaffold 3 new Vite+React 18 apps; per-app configs; root dev scripts; ports 5173–5176 | ✅ done |
 | **Phase 0b** | **Theme, components & PWA shells** | **Vendored theme tokens; `useTheme` hook; `StatusBadge` component; PWA manifests + sw; `.env` with `VITE_APP_ID`** | **✅ done** |
-| Phase 0c | Backend multi-app wiring | `005_multiapp_identity` + `006_remove_branches` + `sync_tables` migrations; server identity/roles scoped to 4 apps; §0.9 dates, §0.10 client split, §0.11 SSE, §0.12 CI completion | 🔄 0c.1 + 0c.2a done (branches removed) · §0.9–0.12 remaining |
+| Phase 0c | Backend multi-app wiring | `005_multiapp_identity` + `006_remove_branches` + `sync_tables` migrations; server identity/roles scoped to 4 apps; §0.9 dates, §0.10 client split, §0.11 SSE, §0.12 CI completion | 🔄 0c.1 + 0c.2a/b/d/e done (branches removed, Kampala dates, SSE, tests+CI) · §0.10 client split remaining |
 | Phase 1 | Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | — |
 | Phase 2 | PDF & documents | jsPDF + AutoTable, 14 document types, print/download/attach | — |
 | Phase 3 | Notifications, feedback, real-time | WhatsApp/SMS, completion message, feedback form, SSE | — |
@@ -29,7 +29,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | Phase 6 | Real-time upgrade | Socket.IO chat, Inbox, presence, live map | — |
 | Phase 7 | Depth | Payment gateway + reconciliation, scheduled reports, dunning | — |
 
-> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c 🔄 (0c.1 + 0c.2a done — see Phase 0c section; §0.9–§0.12 remain: Kampala dates, client split, SSE, CI). Phases 0.1–0.8 (baseline, migrations, identity, auth, handler split, zod, numbering) are also complete from prior work.
+> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c 🔄 (0c.1 + 0c.2a/b/d/e done — see Phase 0c section; §0.10 admin client split remains). Phases 0.1–0.8 (baseline, migrations, identity, auth, handler split, zod, numbering) are also complete from prior work.
 
 ---
 
@@ -49,10 +49,10 @@ SSE, CI. **No later phase can be built safely before this.**
 | 0.6 | Split the 13 handlers out of `server/index.ts` into `routes/*` + `repositories/*` | [x] | `index.ts` down to 60 lines (wiring only). Routers: `routes/{workspace,customers,jobs,equipment,expenses,services,inventory,admin}.ts` + shared `routes/handlers.ts`; SQL in `repositories/{workspace,records}.ts`; shared helpers in `lib/{http,tables}.ts`. Verified: 43-check parity probe (all 13 endpoints, id prefixes, defaults, 400/404 messages, export→import round-trip, reset, 404 fallthrough) all pass, 14-check enforcement probe with `AUTH_ENFORCE=true` passes, 11-check identity probe passes, client production build green. **Bug found & fixed:** `TRUNCATE … CASCADE` reached `employees` (via `employees.branch_id`) and `devices`, so `/api/reset` and `/api/import` deleted staff logins; identity rows are now snapshotted and restored inside the same transaction |
 | 0.7 | Per-route zod schemas replacing the generic column map (`server/validation/*`) | [x] | Unknown fields return 422 instead of silent drop. Replaced unsafe `z.coerce.number()` with `z.preprocess()` so null and empty string fail cleanly; validated backup import with array index paths; live 44-probe check verified. |
 | 0.8 | Server-side document numbering (`services/numbering.ts`) | [x] | `004_numbering.sql` creates `document_sequences` with JOB/INV/LDY seeds (next values 145/99/217, above seed-data maxima); `nextNumber()` does `UPDATE ... RETURNING` inside the caller's transaction; `createHandler` now accepts a `sequenceKey` option that wraps the insert in BEGIN/COMMIT so concurrent creates can never collide; jobs route passes `sequenceKey: 'job'`; `number` made optional in `jobCreate` schema; client `JobForm` no longer sends a client-generated number. Verified: single create returns JOB-00145; 10 concurrent creates yield 10 unique numbers JOB-00147…JOB-00156; client-supplied numbers still accepted (backward compat); server typecheck green; client build clean |
-| 0.9 | Africa/Kampala date handling (`client/src/lib/dates.ts`, `server/lib/dates.ts`) | [ ] | 01:00 local → today's local date; maintenance flags match local day |
+| 0.9 | Africa/Kampala date handling (`client/src/lib/dates.ts`, `server/lib/dates.ts`) | [x] | `server/lib/dates.ts` (`kampalaToday`/`addDays`/`isMaintenanceDue`, injectable clock for tests) + admin mirror `src/lib/dates.ts` (`todayISO`/`addDays`/`isMaintenanceDue`/`periodStart`); expense/equipment routes default and compare on Kampala local days; App.tsx `getStartDate` delegates and an `isDue` helper drives maintenance flags, nav badges and dashboard alerts |
 | 0.10 | Client split (app/features/components/lib) + router + query cache | [ ] | UI identical, deep links work, `App.tsx` under 150 lines, build/lint/typecheck pass |
-| 0.11 | Scoped/paginated endpoints + SSE event bus (`routes/events.ts`, `services/realtime.ts`) | [ ] | Job created in browser A appears in browser B without refresh |
-| 0.12 | Tests + CI (`server/test/*`, client tests, `.github/workflows/ci.yml`) | [ ] | CI green covering numbering, ledger, depreciation, dates |
+| 0.11 | Scoped/paginated endpoints + SSE event bus (`routes/events.ts`, `services/realtime.ts`) | [x] | Realtime pub/sub (throwing subscribers isolated, 15s heartbeat) + `GET /api/events` (all four scopes, staged enforcement); `job-created`/`*-updated` published post-response, `workspace-reset` on import/reset; admin EventSource auto-reconnects with a 30s fallback refresh. Live probe: job POST streamed `event: job-created` (server issued JOB-00146) |
+| 0.12 | Tests + CI (`server/test/*`, client tests, `.github/workflows/ci.yml`) | [x] | 17-test node:test suite 17/17 (dates rollover, validation 422s, app_scope JWTs + requireScope, realtime bus); CI: server job on postgres:16 (typecheck, tests, fresh-db migrate 001→007, branchless assertion, API smoke) + apps job (typecheck+build ×4, lint 3 scaffold apps). Numbering/ledger/depreciation coverage lands with Phase 1 |
 
 Phase 0 definition of done: existing behaviour provably unchanged; schema can evolve;
 identity and roles exist; APIs scoped/validated/numbered; two clients stay in sync;
@@ -209,14 +209,64 @@ Probe methodology note: routers expose POST/PATCH only (reads via `/api/data`), 
 
 > Note: transient `[nodemon] app crashed` lines during development were restart churn from editing server files mid-surgery (code and schema briefly disagreeing); a clean boot after the migration applied shows no errors.
 
-### 0c.2 remainder — §0.9–§0.12 (next)
+### 0c.2b — §0.9 Africa/Kampala dates ✅
+
+| Step | Work | Status | Notes |
+| --- | --- | --- | --- |
+| 0c.2b-1 | `server/lib/dates.ts`: `kampalaToday(now?)`, `addDays(iso, days)`, `isMaintenanceDue(nextDue, today?)` — fixed-instant parameters so tests can pin the clock | [x] | Kampala is UTC+3 with no DST; `en-CA` locale formats YYYY-MM-DD at UTC+3 |
+| 0c.2b-2 | Write paths: expense and equipment routes default `date` / compare maintenance via the shared helpers instead of `toISOString().slice(0, 10)` | [x] | A 23:30 UTC create now lands on the Kampala "tomorrow" the user sees |
+| 0c.2b-3 | Admin mirror `src/lib/dates.ts`; `App.tsx` `getStartDate` delegates, `isDue` helper drives equipment maintenance flags, nav badges and dashboard alerts | [x] | Lint baseline improved to 20 (was 21); no new errors |
+
+### 0c.2b Verification matrix
+
+| Check | Result |
+| --- | --- |
+| Server + admin typecheck | ✅ exit 0 |
+| Admin lint | ✅ 20 errors (baseline was 21 — one pre-existing error fixed, none added) |
+| Unit tests (day rollover, calendar arithmetic, due boundary, empty schedule) | ✅ pass (see 0c.2e) |
+
+### 0c.2d — §0.11 SSE event bus ✅
+
+| Step | Work | Status | Notes |
+| --- | --- | --- | --- |
+| 0c.2d-1 | `server/services/realtime.ts`: pub/sub (`subscribe`/`publish`), 15s heartbeat, `initializeSseStream` (flush headers + `: connected`), `resetSubscribers` for tests; throwing subscribers cannot break the bus | [x] | Events are one-line JSON `{ type, at }` for EventSource |
+| 0c.2d-2 | `server/routes/events.ts`: `GET /api/events` with `requireScope('admin', 'laundry', 'portal', 'store')` (staged — pass-through until `AUTH_ENFORCE=true`), mounted in `index.ts` before the admin router | [x] | Every app scope may listen per plan §10.4 |
+| 0c.2d-3 | Publish points: `handlers.ts` emits `job-created` + `*-updated` after the response via `eventTypeFor()`; `admin.ts` emits `workspace-reset` after import/reset | [x] | Published post-response so a slow publish never delays the write |
+| 0c.2d-4 | Admin `App.tsx` EventSource effect: auto-reconnect (4s backoff) + 30s fallback workspace refresh | [x] | connect-once effect carries an exhaustive-deps disable |
+
+### 0c.2d Verification matrix
+
+| Check | Result |
+| --- | --- |
+| Live probe: `curl -N /api/events` listener + `POST /api/jobs` | ✅ `event: job-created` received with proper SSE framing; server issued JOB-00146; probe row deleted afterwards |
+| `/api/events` in staged mode (no token) | ✅ streams `: connected` |
+| Realtime bus unit tests (fan-out, throwing-subscriber isolation, reset) | ✅ pass (see 0c.2e) |
+| Server typecheck | ✅ exit 0 |
+
+> Probe history: two earlier 404 "Not found" responses from `/api/events` were a stale nodemon instance serving old code on the API port, not a missing route; the clean boot above is the acceptance run.
+
+### 0c.2e — §0.12 Tests + CI ✅
+
+| Step | Work | Status | Notes |
+| --- | --- | --- | --- |
+| 0c.2e-1 | `server/test/` node:test suite — `index.ts` entry + `dates.test.ts` (Kampala rollover, addDays, maintenance boundary), `validation.test.ts` (unknown fields → 422, branchless schemas, money preprocessing, equipment usage), `auth.test.ts` (app_scope JWT claims, token-type confusion, tampering, requireScope enforced/staged, realtime bus) | [x] | **17/17 pass** via `npm test` (`node --import tsx --test test/index.ts`); test-file typecheck fixed (`parseBody` results asserted with local types) |
+| 0c.2e-2 | `.github/workflows/ci.yml` — server job: postgres:16 service, `npm ci`, typecheck, tests, fresh-database `db:migrate` (001→007), branchless-schema assertion, API smoke boot on :5000; apps job: install+typecheck+build ×4, lint the 3 scaffold apps | [x] | Branchless assertion uses the proven one-liner `tsx -e "import('dotenv/config').then(…)"` form |
+| 0c.2e-3 | Root `package.json` gains `test` (delegates to the server); `.gitignore` gains `*.timestamp-*.mjs` (Vite temp artifact) | [x] | Circular `gabfix-erp: file:..` dep confirmed still removed; `npm ci` verified |
+
+### 0c.2e Verification matrix
+
+| Check | Result |
+| --- | --- |
+| `cd server && npm test` | ✅ 17/17 (tests 17, pass 17, fail 0) |
+| `npm run typecheck` (root: 4 apps + server) | ✅ exit 0 |
+| Admin `npm run lint` | ✅ 20 pre-existing errors (baseline 21, no new) |
+| Admin `npm run build` | ✅ vite build + PWA v0.21.2 green (`dist/sw.js` generated) |
+
+### 0c.2 remainder — §0.10 (next)
 
 | Step | Work | Status |
 | --- | --- | --- |
-| 0c.2b | §0.9 Africa/Kampala date handling (`server/lib/dates.ts`, admin `lib/dates.ts`) | [ ] |
-| 0c.2c | §0.10 admin client split (app/features/components/lib) | [ ] |
-| 0c.2d | §0.11 SSE event bus (`routes/events.ts`, `services/realtime.ts`) | [ ] |
-| 0c.2e | §0.12 tests + CI (`server/test/*`, `.github/workflows/ci.yml`) | [ ] |
+| 0c.2c | §0.10 admin client split (app/features/components/lib) + router + query cache | [ ] |
 
 ---
 
@@ -226,7 +276,7 @@ Probe methodology note: routers expose POST/PATCH only (reads via `/api/data`), 
 | --- | --- | --- | --- |
 | 0a. Multi-app scaffold | 4 apps (admin + 3 new) + root scripts + per-app configs + ports | 2–3 d | [x] |
 | 0b. Theme, components & PWA shells | Vendored tokens + useTheme + StatusBadge + PWA manifests | 1–2 d | [x] |
-| 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; branches removed; §0.9–0.12 | 3–5 d | [~] 0c.1 + 0c.2a done |
+| 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; branches removed; §0.9/§0.11/§0.12 done | 3–5 d | [~] 0c.1 + 0c.2a/b/d/e done · §0.10 remains |
 | 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [ ] |
 | 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [ ] |
 | 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [ ] |
@@ -266,6 +316,10 @@ Probe methodology note: routers expose POST/PATCH only (reads via `/api/data`), 
 | 2026-09-26 | Phase 0c.1 done: `005_multiapp_identity.sql` (app_scope + storekeeper + owner=all-4 scopes + single-owner index), `007_sync_outbox.sql` (sync_outbox + feedback_requests), `requireScope` guard + `app_scope` in JWTs (pre-0c tokens fall back to admin scope), CORS allowlist (4 Vercel origins + 5173–5179, `CORS_ALLOW_ALL` escape hatch), scoped route mounts per plan §10.4. Verified: DB probe 8/8, API probe staged 5/5 + enforced 8/8, root typecheck clean; temp probes deleted |
 | 2026-09-26 | Phase 0c verification against live stack: baseline boot (5 processes, 0 PWA warnings, clean SIGINT shutdown, no orphans) and enforced-mode boot (AUTH_ENFORCE=true temporarily set then reverted): 401 without token through all four apps' `/api` proxies, owner JWT carries all 4 scopes, owner token → 200 through every proxy |
 | 2026-09-26 | Phase 0c.2a done — branches removed everywhere (single-shop per plan decision #9): `006_remove_branches.sql` drops catalog-discovered FKs + `branch_id` columns + `branches`; seed data, `db.ts`, validation resources, `TRUNCATE_TABLES`, bootstrap empty-check, and the admin app (types, branch switcher, filters, table column, Branch-performance report, form selects, dead CSS) all de-branched. Verified: schema probe 8/8, fresh-DB bootstrap 5/5, write-path probes 7/7 (branchId → 422, reset intact), root typecheck 0, admin lint back at 21-error baseline, admin build green with PWA. Temp probes deleted |
+| 2026-09-27 | Phase 0c.2b done (§0.9): `server/lib/dates.ts` (`kampalaToday`/`addDays`/`isMaintenanceDue`) + admin mirror `src/lib/dates.ts`; expense/equipment date defaults and maintenance flags now use Kampala local days instead of UTC slices; App.tsx `getStartDate`/`isDue` rewiring. Admin lint baseline improved to 20 (was 21) |
+| 2026-09-27 | Phase 0c.2d done (§0.11): realtime pub/sub service + `GET /api/events` SSE route (all scopes, staged enforcement), `job-created`/`*-updated`/`workspace-reset` publishes, admin EventSource with reconnect + 30s fallback refresh. Live acceptance probe: job POST streamed `event: job-created` (JOB-00146 issued, probe row deleted); two earlier 404s traced to a stale nodemon serving old code, not a missing route |
+| 2026-09-27 | Phase 0c.2e done (§0.12): 17-test node:test suite (dates, validation, auth/scopes, realtime bus) — 17/17 pass; `.github/workflows/ci.yml` (server job: postgres:16, fresh-db migrate 001→007, branchless assertion, API smoke; apps job: typecheck+build ×4, lint ×3); root `npm test`; `.gitignore` += `*.timestamp-*.mjs`; test-file typecheck fixed |
+| 2026-09-27 | API port moved 4000 → 5000 (user request): server default `PORT` fallback, all 4 vite proxies, CI health-check URL, `server/.env.example`, README; `server/.env` already updated by hand. Seed UUIDs containing "4000" and the SSE 4s reconnect delay were left untouched (not port references). Probe note: ports 5173/5174/4000 were occupied by another project's dev servers — killed with permission before booting |
 
 
 
