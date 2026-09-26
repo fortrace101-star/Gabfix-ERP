@@ -1,0 +1,720 @@
+
+Gabfix Multi-App Plan: Admin Dashboard + Laundry Front Office + Inhouse ERP
+Plan-mode proposal. No files changed. This plan synthesizes all reference documents:
+
+enhance.md §§1-22 + Appendices A-E — the 8-phase backend/feature plan
+erp_design.md — typography, spacing, layout, status, DataTable + StatusBadge, acceptance criteria
+Light_mode.md / Dark_mode.md — light/dark token sets, contrast, persistence, hardcoded-colour cleanup
+Dashboard guidelines.md — inverted pyramid, KPI-as-actions, freshness, narrative arc, anti-patterns
+erp-design-system.md — Inter, type scale, 8px grid, sidebar+topbar layout, functional colour
+dark-mode-light-mode-guide.md — link list consolidated by Light/Dark guides
+Current repo state verified read-only: single client/ (Vite+React 18, App.tsx ~102KB, index.css CSS-variable theme), single server/ (Express+PG, GET /api/data monolith), root package.json script runner, admin-dashboard/, Gabfix_Laundry_Front_Office/, Gabfix_Inhouse_ERP/, packages/ all do not exist yet.
+1. Decisions being locked by this plan
+#	Decision	Rationale
+1	Rename client/ → admin-dashboard/ (package gabfix-admin-dashboard, title "Gabfix Admin Dashboard")	User request. Preserves git history via git mv.
+2	Two new sibling Vite+React 18 apps: Gabfix_Laundry_Front_Office/ ("Gabfix_Laundry_Front_Office") and Gabfix_Inhouse_ERP/ ("Gabfix_Inhouse_ERP")	User request: same stack as current client, live in repo root. React 18 keeps react-leaflet@4 valid per enhance.md App. A.
+3	One server, three frontends. No per-app backend. All enhance.md §9 endpoints serve all apps; separation is enforced by JWT claims (role + app_scope) + requireRole()/requireScope()	Avoids 3x schema drift, keeps journal/ledger single-writer, matches enhance.md §17 compatibility strategy.
+4	New packages/ shared layer: ui-kit, theme, api-client, auth-client consumed by all three apps	Direct application of erp_design.md X1/X2/X3 ("one source of truth", one DataTable, one StatusBadge) and erp-design-system.md §7. Without this the three apps drift into three designs within months.
+5	Admin Dashboard is the access-control authority: users, roles, app assignments, device assignment, provider keys, feature flags	User requirement ("access control features controlled by this admin dashboard"). Operationalized as: only owner/manager in Admin app can grant/revoke app_scope.
+6	Theme contract from Light/Dark guides is ported from XAML tokens to CSS variables + Tailwind, owned by packages/theme	Light §3 + Dark §3 token tables become :root / [data-theme=dark] variable sets; LD1-DD5 decisions reinterpreted for web (details §6).
+7	enhance.md 8-phase order is preserved; multi-app split is injected as a new Phase 0 workstream before any feature work	Phase 0 is already the "make change safe" gate (enhance.md §18.2); adding apps on top of the 102KB monolith without the split repeats the exact failure enhance.md §20 diagnoses.
+Folder-name caution: spaces in Admin Dashboard break npm scripts and imports. Physical folders will be admin-dashboard/, Gabfix_Laundry_Front_Office/, Gabfix_Inhouse_ERP/ (no spaces); the display titles carry the requested names via each app's index.html + package displayName.
+
+2. Target repository shape
+
+Gabfix-ERP/
+  server/                        # ONE API for all 3 apps (enhance.md §9, extended with /api/auth + /api/access)
+  packages/
+    theme/                       # tokens.css (light+dark variables), tailwind.preset.js, fonts
+    ui-kit/                      # DataTable, StatusBadge, KpiCard, Modal, PageHeader, EmptyState,
+                                 # DateRangePicker, Timeline, MapView, AuthGuard, RequireRole, Toast
+    api-client/                  # typed fetch + auth header + pdf download + SSE (replaces client/src/api.ts)
+    auth-client/                 # login/session/role+scope hooks, token storage (memory + refresh)
+  admin-dashboard/               # renamed client/ — full control plane (title "Gabfix Admin Dashboard")
+  Gabfix_Laundry_Front_Office/   # laundry intake/collection kiosk (title "Gabfix_Laundry_Front_Office")
+  Gabfix_Inhouse_ERP/            # contract-jobs field/team app (title "Gabfix_Inhouse_ERP")
+  docs/                          # enhance.md + this plan + requirements.md (moved from Gabfix adds.txt)
+Root package.json scripts grow symmetrically:
+
+
+setup            → install server + packages/* + all 3 apps
+dev:server       → server only
+dev:admin        → admin-dashboard (5173)
+dev:laundry      → front-office (5174)
+dev:inhouse      → inhouse ERP (5175)
+build / typecheck / lint → run per workspace
+Vite proxy (/api → localhost:4000) is copied into both new apps. Ports 5174/5175 avoid collision during concurrent dev.
+
+3. Separation of concerns — what lives where
+Principle (from enhance.md §11 + Dashboard guidelines §1 "start with purpose"): each app answers one user's top two questions in ten seconds. Anything that doesn't serve that app's decisions doesn't ship in it (§10 anti-patterns: no data dumps).
+
+3.1 Admin Dashboard (admin-dashboard/) — the control plane
+Who: owner, manager, accountant. Decisions: "Are we healthy? Who can do what? What needs escalation?"
+
+Domain	Admin gets (exclusive unless noted)	enhance.md ref
+Access control	Users/employees CRUD, roles (owner/manager/sales/technician/laundry/accountant), app-scope grants (admin/laundry/inhouse per user), device↔employee assignment, session revoke	§8.2 (employees/devices), §9 Identity, §6.6
+Money & ledger	Full: payments + methods, CoA, journal/ledger, P&L / balance sheet / cash flow / AR aging, expenses approve, assets + depreciation, costing review	§§15, 12, 9 Money/Reporting
+Sales & management	Pipeline, quotes→won, salesperson attribution, commissions, targets, role-scoped Manager dashboard, utilisation	§16
+Field oversight	Live Leaflet map, all trails, geofences, trip reports, GPS retention/audit views	§14
+Engagement	Inbox + WhatsApp threads, templates, notification log, feedback + CSAT, provider-key settings, feature flags	§13
+System	Migrations status, health/providers, backup/restore, document sequences	§§8, 17–18
+Admin retains all current screens (dashboard/jobs/customers/finance/laundry/equipment/inventory/reports/settings) restructured per enhance.md §11.1 nav groups, rebuilt on packages/ui-kit.
+
+3.2 Laundry Front Office (Gabfix_Laundry_Front_Office/) — the counter kiosk
+Who: laundry staff, walk-in customers (assisted). Decisions: "What comes in now? What's ready to hand over and collect?"
+
+Included	Deliberately excluded (Admin-only)
+Intake form (customer lookup/create-limited, items via laundry_order_items, promised date, ticket print/PDF)	No CoA/journal/ledger, no P&L
+Status board Received→Washing→Drying→Ready→Collected with big touch targets	No provider keys, no templates editing, no user management
+Collect flow: balance due → record payment (cash/momo/bank, reference) → receipt PDF → triggers laundry.ready/collected events	Payment methods config is read-only lookup; gateway reconciliation stays Admin
+Customer search + today's ready list + overdue pickups; freshness stamp + Refresh	No cross-branch data (scoped to branch_id claim); no employee/GPS views
+Feedback summary read-only (own branch)	No CSAT drill-down, no commissions
+Design bias per Dashboard guidelines §§2–4: tactical/operational archetype — KPI strip (Due today / Ready / Overdue / Collected), stacked cards below md (never squished tables, §10), min-h-44px buttons (.btn-* rule already in index.css), full-width primary action on mobile, skeleton loading matching card rhythm, LastUpdated stamp. Light mode default (counter lighting), dark available via same toggle.
+
+3.3 Inhouse ERP (Gabfix_Inhouse_ERP/) — the contract-jobs team app
+Who: technicians, supervisors, sales. Decisions: "What are my jobs today? What's blocked? What did it cost?"
+
+Included	Deliberately excluded
+My Jobs (scoped by job_assignments), dispatch board (supervisor), job calendar, job detail with job_events stepper (Quote→Scheduled→Started→Completed→Invoiced→Paid)	No ledger/journal, no provider config, no cross-division finance
+Start/complete flows; completion triggers the templated message payload (enhance.md §13.3)	Template wording is Admin-owned; app only fires the event
+Timesheets, job costs capture (materials/fuel/subcontractor), equipment usage, expense submission (approval in Admin)	Asset register, depreciation schedules read-only or hidden by role
+/field PWA beacon (shift-based ping), today's route, site geofence alerts	Live map of all staff restricted to supervisor+ (privacy rule, §14); technicians see own trail only
+Job cards, delivery notes, trip PDFs; offline-tolerant queue for pings + status changes	Gateway, dunning, scheduled reports stay Admin
+Technician home follows the narrative arc (§9): headline (today's jobs + SLA risk) → why (detail rows with status badges) → what now (one contextual action per row: Start / Complete / Add cost).
+
+3.4 Concern matrix (enhance requirements → app)
+enhance.md §5 #	Requirement	Admin	Laundry FO	Inhouse	Server owner
+1	Job + laundry dates	Full (stepper, calendar, SLA)	Laundry dates only	Job dates + my timeline	job_events, date columns, 004/008
+2, 9, 10	Completion msg + feedback + appreciation	Templates, log, CSAT, Inbox	Fires laundry.ready; shows status	Fires job.completed	Messaging svc, 009, scheduler
+3	GPS company numbers	Live map, trails, geofences, audit	—	Beacon + own trail	Telemetry svc, 010
+4	Payment methods	Config + reconcile + reports	Collect + receipt	View job balance only	payments, 005
+5	Technician assignment	Assign + utilisation	— (laundry roster only)	My jobs + accept	job_assignments, 004
+6	P/L, expenses, assets	Full ledger + assets	Submit expense only	Submit expense/cost only	005/007, journal
+7	Costs	Review + costing reports	—	Capture (timesheets, costs)	006
+8	Sales + manager dashboard	Full	—	Sales pipeline (own)	salesperson_id, commissions
+11	PDF downloads	All 12 types	Ticket + receipt + ready-list	Job card + delivery + trip	services/pdf, DOCUMENT_STORAGE_DIR
+12	Notifications + realtime	Bell + Inbox + SSE/Socket.IO	Bell (scoped) + SSE	Bell (scoped) + SSE + chat (Ph.6)	Event bus, GET /api/events
+4. Access control design (Admin-governed)
+enhance.md §6.6 + §8.2 give identity; this plan adds the app dimension:
+
+
+employees.role        owner | manager | sales | technician | laundry | accountant   (existing enum, App. D)
+employees.app_scope[] admin | laundry | inhouse                                         (new, Admin-assigned)
+devices               msisdn ↔ employee_id, active                                      (existing §8.2)
+Login is shared (POST /api/auth/login → JWT with role + app_scope[] + branch_id). Each app's AuthGuard rejects tokens lacking its scope — so a laundry login cannot open Admin routes even by URL.
+RequireRole hides nav + routes per role within each app (e.g. Inhouse: supervisor sees dispatch, technician sees My Jobs only).
+Admin-only screens: Roles & access (/settings/access), Devices & numbers, Provider keys, Feature flags (whatsapp_enabled, sms_enabled, gps_enabled per enhance.md §7).
+Server: requireAuth → requireScope(app) → requireRole(...) middleware chain; branch scoping (branch_id claim filters laundry/jobs/payments); audit (created_by, trail-view log for GPS per §14).
+GPS privacy rule (carries enhance.md §21.2 default): shift-only tracking, visible indicator, 90-day retention, manager/owner-only full map, technicians see own trail.
+5. Shared design system — how the guides land in code
+5.1 packages/theme (from Light §3, Dark §3, erp-design-system §§1–6)
+Port the XAML token tables to CSS custom properties with two contracts: :root (light: page #F5F5F5, card #FFFFFF, text #2D2D2D/#5A5A5A/#6B7280, sidebar white #FFFFFF + divider #E5E7EB per LD1) and [data-theme="dark"] (frame #121212, base #1C1C1E, raised #2A2A2E/#34343A, overlay #3C3C43, inset #17171A, text #E8E8EA/#A8A8B0/#90909A per DD1).
+Rules enforced: semantic roles only (surface-raised, text-primary) — no hex in feature views (Light P2); off-white text never pure #FFFFFF in dark (Dark D-P3); print/PDF surfaces stay paper-white (LD3/DD4 — matches enhance.md pdfkit layout kit); muted text must pass AA in both modes (Light §6 / Dark §6 tables become CI contrast checks).
+Inter stays the face (already imported in index.css; erp-design-system.md §1 + erp_design §3.1); tabular numerals for money columns (font-variant-numeric: tabular-nums); strict 8px spacing scale; tailwind.preset.js exposes tokens so all three apps share them.
+Honest toggle + persistence (Light L2 / Dark D3): one ThemeService-equivalent hook in packages/theme (useTheme: light|dark|system, localStorage persist, OS-default honour, toggle initial-state sync). Toggle lives in every app's Topbar.
+5.2 packages/ui-kit (from erp_design §§3–5, Dashboard §§4–7)
+Build order follows erp_design §8 (typography/status first, DataTable the long pole):
+
+StatusBadge (enum→brush+label; badge+word never colour alone; vocabulary table per erp_design §3.3).
+Typography/density pass (right-aligned numerics + headers, totals row, Compact/Comfortable/Spacious persisted).
+DataTable (toolbar, sort with direction indicator, sticky header per E0 decision, "Showing N of M", totals row, empty/loading skeleton/error/disabled states, ≥24px targets).
+KpiCard (clickable → applies filter, per Dashboard §2), PageHeader, Modal (role=dialog + focus trap + Esc), EmptyState, DateRangePicker, Timeline, MapView (Leaflet wrapper), ConfirmDialog, Toast.
+Dashboard page template per §§2, 9: KPI strip → trends/comparisons → details/actions; filters above content; every metric has units + timestamp + comparison; no data dumps, no many-slice pies, no dual-axis charts, no hover-only actions (§10).
+5.3 Per-app theming notes
+Admin: full density selector + both themes; densest tables (power users).
+Laundry FO: Comfortable/Spacious only, 44px+ targets, light-first, bottom nav on mobile (pattern already proven in Dashboard guidelines "Applied Changes").
+Inhouse: mobile-first field use; dark mode matters (outdoor/glare + battery); beacon page is minimal chrome, high-contrast actions.
+6. Integrations — what they are and where they live
+All placements extend enhance.md §6; all integration code lives in server/ so the three apps share behaviour:
+
+Integration	Package/adapter	Placement	Consumed by
+WhatsApp Cloud API (primary) + Twilio fallback	whatsapp-cloud.ts, twilio.ts behind sendTemplate()/sendDocument()	server/services/messaging/ + server/routes/webhooks.ts + message_templates table	Job-complete (Inhouse), laundry-ready (FO), appreciation scheduler, Admin Inbox
+SMS fallback (Africa's Talking)	africastalking.ts	same service	Completion short-form + link when no WhatsApp
+Email (SMTP/nodemailer)	email.ts	same service	PDF invoices/statements/reports (§12 docs)
+Realtime SSE → Socket.IO (Ph.6)	services/realtime.ts, routes/events.ts, later Socket.IO	GET /api/events → RealtimeProvider in packages/api-client	All 3 bells; Admin dispatch/map live; Ph.6 chat/Inbox
+GPS ingest + Leaflet render	POST /api/telemetry/pings, rollup cron, MapView in ui-kit	server/routes/telemetry.ts, location_pings/rollups/geofences	Inhouse beacon → Admin map
+Payments (manual now; Pesapal/Flutterwave Ph.7 behind PaymentProvider)	services/payments.ts + journal posting	server/routes/payments.ts, 005_money	FO collect, Inhouse view, Admin reconcile
+PDF (pdfkit + embedded Inter)	services/pdf/ layout kit	GET /api/documents/:type/:id.pdf + storage mirror	Ticket/receipt (FO), job card/trip (Inhouse), all 12 (Admin)
+Auth/RBAC	jsonwebtoken + bcryptjs, requireAuth/requireRole/requireScope	server/routes/auth.ts, middleware/	All apps via packages/auth-client
+Jobs/scheduling	node-cron → BullMQ/Redis later; pino, helmet, rate-limit, zod, multer	server/services/scheduler.ts, middleware	Reminders, appreciation +24h, depreciation, rollups, backups
+Provider lead times are unchanged from enhance.md §6.8 — Meta verification + WABA number + templates + public HTTPS + sender-ID remain the long pole and start immediately, in parallel with Phase 0.
+
+7. Delivery sequence (extends enhance.md §18)
+Phase	Work	Multi-app addition
+0a. Monorepo + rename	git mv client admin-dashboard; scaffold the two apps from the same Vite template; packages/theme+api-client+auth-client; root scripts + ports; remove circular gabfix-erp:file:..; server/.env.example; commit clean baseline	New. Gate for everything below.
+0b. Theme + ui-kit foundation	Port Light §3/Dark §3 tokens to packages/theme; honest toggle; StatusBadge + typography/numeric pass in Admin	Light L0–L2, Dark D0–D1, erp_design E1–E2.
+0c. Backend foundations	Migration runner + 001 baseline + 002 audit + 003 identity (+app_scope); auth routes + middleware; route split; zod; numbering; Kampala dates; SSE bus; CI	enhance.md §18.2 steps 0.2–0.12 verbatim, plus scope claims.
+1. Data spine	payments/methods, CoA/journal, costs/timesheets, job events + dates, laundry items, assets	FO collect + Inhouse cost capture ride this phase; Admin gets ledger screens.
+2. PDF + DataTable	pdfkit 12 docs; shared DataTable + density + counts + states	Ticket/receipt/job-card first (unblock FO/Inhouse), then Admin reports.
+3. Notifications/feedback/realtime	Adapters, templates, scheduler, bell rewrite, /feedback/:token, webhooks, SSE wiring	FO + Inhouse bells scoped; completion payload fired from both ops apps.
+4. Field ops	Assignments, technician view, beacon PWA, devices, map, geofences, trips	Inhouse beacon + Admin map are the deliverable pair.
+5. Sales + manager dashboard	Attribution, pipeline, commissions, role dashboards	Admin full; Inhouse own-pipeline slice.
+6–7	Socket.IO chat/Inbox; gateway + dunning + scheduled reports	Chat spans Admin↔Inhouse; FO gets read-only thread view.
+Each phase keeps enhance.md §18.1 exit criteria + the per-guide regression gates (theme swap leaves no stale surface; both themes walked at 3 widths; contrast checks; typecheck+lint+test green).
+
+8. Effort delta over enhance.md §22 (51–79 dev-days, single app)
+Addition	Estimate
+0a monorepo + rename + 2 scaffolds + shared packages wiring	4–6 days
+0b theme port + toggle + StatusBadge + type/numeric pass	3–5 days
+DataTable + dashboard template ×3 apps (built once, integrated 3×)	+4–6 days over single-app E3
+FO app (intake, board, collect, scoped bell, PDFs)	6–9 days
+Inhouse app (my jobs, dispatch slice, calendar, costs, beacon, scoped bell)	8–12 days
+Access-control screens + scope middleware + branch scoping + tests	3–5 days
+Revised total	~79–122 dev-days (single dev; provider waits excluded, per §22 assumptions)
+Biggest risks: (1) Meta verification gating §3-work messaging — run in parallel from day one; (2) the App.tsx 102KB split now fans into three apps — hence Phase 0a/0b before any feature; (3) scope-creep across three surfaces — the §3 matrix is the fence: anything not in an app's column doesn't ship there.
+
+9. Open decisions needed before Act mode
+Physical folder casing: Gabfix_Laundry_Front_Office/ + Gabfix_Inhouse_ERP/ exactly as requested vs. lowercase convention (laundry-front-office/, inhouse-erp/)? Recommend exact requested names to avoid confusion; display titles match regardless.
+Laundry branch scoping: one FO deployment filtered by login branch, or one deployment per branch? Recommend single build + branch_id claim (matches enhance.md branch model).
+GPS consent: confirm shift-only + 90-day retention default (§21.2) before beacon work.
+Ledger depth: confirm double-entry default (needed for balance sheet; drives Phase 1 scope).
+Live vs. demo DB: confirm before Phase 1 backfill design.
+Behalf-of implementation: should I write this multi-app plan into enhance.md (new §23 + appendix updates) or a standalone multi-app-plan.md? Recommend standalone file + short pointer in enhance.md Appendix E, keeping enhance.md stable as the backend contract.
+Next step: approve (and answer §9), then toggle to 
+Act Mode (⌘⇧A). Proposed first Act slice: Phase 0a — git mv client admin-dashboard, scaffold the two apps, create packages/theme+api-client+auth-client shells, wire root scripts, remove the circular dependency, commit — with the diff shown before any Phase 0b/0c work begins.
+
+
+Also add that tle LAundry Front office APP should be a progressive web app that integrates with the onlibe database when it gets online but can work entirely office. SO it should have its own IndexDB (Dixie DB) that stores relevant concerns offline but synchronises with the onlbe DB when online. When online it stores in local and syns with remote db. when offline it stores in local and awaits to sync with remote when it gets a connection
+
+Addendum: Laundry Front Office as Offline-First PWA (Dexie.js + Sync)
+Plan-mode addendum to the Multi-App Plan. No files changed. This extends enhance.md + erp_design.md + Light/Dark_mode.md + Dashboard guidelines.md with one new constraint: Gabfix_Laundry_Front_Office/ works fully offline at the counter and syncs with the online DB when connectivity returns.
+
+1. What changes vs the previous plan
+Before	Now
+Laundry FO = online-only Vite app reading scoped GET /api/laundry + SSE	Laundry FO = installable PWA, local-first: every counter write goes to Dexie.js IndexedDB first, then syncs to server/ when online
+No client-side persistence beyond auth token	New Gabfix_Laundry_Front_Office/src/lib/db.ts (Dexie) + sync/ engine + Service Worker + Web App Manifest
+Server numbering (document_sequences, enhance.md §8) assumed online create	Offline creates need temp local IDs + server reconciliation (see §4) — this is the single hardest part, designed below
+Freshness = SSE only	Freshness = Last synced HH:MM + pending-count badge + connectivity pill (applies Dashboard guidelines §5 freshness rule to offline state)
+Nothing about the other two apps changes. Admin Dashboard and Inhouse ERP stay online-first (Inhouse keeps only a tiny ping/status outbox for the beacon, not full offline).
+
+2. PWA shell (lives entirely in Gabfix_Laundry_Front_Office/)
+Manifest (manifest.webmanifest): name Gabfix_Laundry_Front_Office, short name Gabfix Laundry, display: standalone, branch-coloured icons (maskable 192/512), start_url: /, light theme_color matching packages/theme paper token (LD3 print rule unaffected).
+Service Worker via vite-plugin-pwa + Workbox:
+CacheFirst for app shell (JS/CSS/fonts/Inter), StaleWhileRevalidate for lookups (payment methods, services price list, branch config), NetworkFirst with cache fallback for API pulls.
+Offline fallback route → cached /offline view (erp_design empty-state pattern: icon + headline + "N orders waiting to sync" + Retry button), never a browser dead page.
+Background Sync (sync-pending-outbox) + Periodic Sync fallback + online/visibilitychange listeners, so sync fires on reconnect even if the tab was closed.
+Install prompt: counter tablets get Add-to-Home-Screen banner; kiosk mode documented in README (Chrome/Edge fullscreen).
+Theme: same packages/theme tokens + toggle; FO defaults light (counter lighting per §5.3), 44px+ targets, stacked cards below md — offline status pill must be visible in both themes (contrast-checked per Light §6 / Dark §6).
+3. Dexie local DB — relevant concerns only (branch-scoped subset, never the whole ERP)
+src/lib/db.ts (Dexie 4):
+
+
+laundry_orders      localId (pk, `local-<uuid>`), serverId?, branch_id, customer_id,
+                    status, items_total, amount_due/paid, promised_at, ready_at,
+                    collected_at, created_at, updated_at, syncState, serverSeq?
+laundry_order_items localId, orderLocalId → index, service_id, description, qty, unit, unit_price, amount
+customers_cache     id, branch_id, name, phone (unique index), balance_snapshot, updated_at
+                    (last ~500 used at this branch only — NOT full customer table)
+payments_outbox     localId, orderLocalId, amount, method_id, reference, received_at,
+                    idempotency_key (uuid, pk-unique), attempts, last_error, syncState
+lookups             key (services pricelist, payment_methods, branch_config, message templates snapshot),
+                    value (json), fetched_at
+outbox              seq++, op (create_order | update_status | create_payment | create_customer),
+                    entity, localId, payload, idempotency_key, created_at, attempts, last_error
+meta                key (last_pull_at, device_id, branch_id), value
+syncState = synced | pending | conflict | failed
+Explicitly NOT stored offline: CoA/journal/ledger, P&L, assets, employees of other branches, other branches' orders, provider keys, full audit log. This is the §3 fence applied to storage.
+
+Pruning: synced + collected orders older than 30 days are evicted from Dexie (server remains source of truth); outbox rows are deleted only on server ACK.
+
+4. Sync protocol (the core design)
+Write path — always local-first:
+
+Online: write Dexie (pending) → immediate push() → server ACK → mark synced, store serverId + authoritative number/PDF URL. UI shows optimistic state with "Syncing…" then "Synced".
+Offline: write Dexie (pending) → outbox row → UI shows "Waiting to sync (N)". No blocking; counter keeps serving customers.
+Push: POST /api/sync/push (new, enhance.md §9 addition) accepts ordered ops with idempotency_key. Server applies idempotently (retries safe), returns per-op { localId → serverId, number, status, server_updated_at }. Auth: same JWT + requireScope('laundry'); expired token → queue stays, UI prompts re-login, no data loss.
+
+Pull: GET /api/sync/pull?branch_id&since=<last_pull_at> returns delta (orders/items/payments/methods/pricelist changed by others, e.g. Admin edits). Client upserts into Dexie, advances last_pull_at. First login does a bounded seed pull (this branch, last 90 days + open orders).
+
+Temp-ID reconciliation (resolves the document_sequences conflict):
+
+Offline orders/payments carry local-<uuid> + idempotency_key. Server assigns the real number (LND-…, RCPT-…) at push time from document_sequences — numbers are therefore never assigned offline, only mapped on ACK. Ticket printed offline shows DRAFT local-… / amounts; reprint after sync shows the authoritative number. This preserves enhance.md §8 uniqueness without distributed counters.
+All FK references inside one push batch resolve by idempotency_key, so an order + its items + its payment created offline in one session link correctly server-side.
+Conflict policy (server-wins with review, never silent overwrite):
+
+Field updates: MAX(updated_at) wins; loser marked conflict and surfaced in FO ("Order LND-104 changed by Manager — Review") + Admin log.
+Payments: never auto-merged — duplicate idempotency_key dedupes; amount mismatches go to failed + Admin reconcile queue (money-safety over convenience, extends enhance.md §15).
+Status transitions validated server-side (Received→…→Collected); illegal jumps rejected with reason shown at counter.
+5. Offline-capable features in the FO (and where each lives)
+Counter flow	Offline behaviour	Placement
+Intake + ticket	Full offline: customer lookup (cache) / create (queued), items + promised date, local ticket render (client-side template mirroring server layout; authoritative pdfkit PDF fetched post-sync)	features/intake/, lib/ticket.ts
+Status board	Full offline read; status taps queue update_status ops	features/board/
+Collect + payment	Full offline: cash/MoMo/bank + reference recorded to payments_outbox; receipt marked DRAFT until ACK, then auto-upgraded	features/collect/, lib/db.ts
+Ready/overdue lists	From Dexie; counts include pending rows with pending badge	features/board/
+Bell + Last synced	Bell reads cached notifications; header shows ● Online / ○ Offline — Synced 14:32 · 3 waiting (Dashboard §5 rule)	components/ConnectivityBar (new ui-kit addition, reused by Inhouse)
+Feedback	Completion events queue; appreciation SMS/WhatsApp fires server-side after push (preserves enhance.md §13 exactly-once via dedupe index)	server scheduler (unchanged)
+Access control offline: cached JWT + app_scope + branch_id enforced client-side for UX, re-validated server-side on every push/pull; Admin revoke takes effect at next successful sync + token expiry (documented limitation, accepted for counter continuity).
+
+6. Server additions (extends enhance.md §§8–9, Phase 1/3 scope)
+POST /api/sync/push, GET /api/sync/pull, GET /api/sync/status (per-branch pending counts for Admin oversight).
+idempotency_keys(key pk, response jsonb, created_at) table + serverId ↔ clientLocalId mapping column on laundry orders/payments.
+updated_at triggers (already enhance.md §8 002) become the pull cursor — no new clock needed; Kampala-day logic unchanged.
+Admin screens: Sync health (per-branch pending/failed/conflict), failed-op retry/skip, conflict review — lives in Admin Dashboard §3.1 System group.
+7. Phasing + effort delta
+Phase	Offline/PWA work
+0a	Scaffold FO with vite-plugin-pwa + manifest + empty SW from day one (cheap, avoids retrofit)
+0b	ConnectivityBar, offline empty-states, Last synced pattern in ui-kit
+1	Dexie schema + outbox + /api/sync/* + idempotency + temp-ID mapping (with the data-spine work)
+2	Local DRAFT ticket/receipt templates; authoritative PDF upgrade-on-ACK
+3	Queued completion events → server-side WhatsApp/appreciation (no template logic in FO)
+Estimate add: +6–10 dev-days over the §8 multi-app total (PWA shell 1–2, Dexie + outbox UI 2–3, sync endpoints + idempotency + conflicts 2–3, offline tickets + UAT incl. kill-network/captive-portal/airplane-mode matrix 1–2). Revised program total ~85–132 dev-days.
+
+8. UAT additions (offline matrix)
+Airplane-mode intake → collect → reconnect: all rows sync, numbers assigned once, no duplicates on retry.
+Kill network mid-push: resume produces identical server state (idempotency proof).
+Admin edits an order while FO offline: conflict surfaces in both apps, server-wins + review action.
+Double-submit same payment offline: single server payment (dedupe proof).
+Fresh install + login on a new tablet: bounded seed pull restores branch queue; DRAFT tickets reprint as authoritative PDFs.
+9. Decisions I need from you (before Act-mode build)
+Temp-number display: show DRAFT tickets offline (recommended) or pre-allocate number blocks per device (complex, risks gaps/duplicates)?
+Customer cache breadth: last-500-used at branch (recommended) vs. full branch customer list?
+Payment conflict strictness: quarantine mismatches for Admin review (recommended) vs. auto-accept counter value?
+Dexie pruning window: 30 days (recommended) vs. longer on large tablets?
+Confirm Dexie.js (you wrote "Dixie" — I read it as Dexie.js, the IndexedDB wrapper; no native or paid dependency involved).
+Proposed Act-mode slice (unchanged order): Phase 0a first (rename + scaffolds + vite-plugin-pwa in FO manifest/SW shell), then Dexie + sync endpoints inside Phase 1. Say the word and toggle to 
+Act Mode (⌘⇧A).
+
+
+
+Clarifications: Shared Packages vs Self-Contained Apps, Dispatch, Naming, Offline-First, Pruning
+You are asking exactly the right questions. Let me explain Decision 4 properly, because the wording was ambiguous.
+
+1. Decision 4 explained: What packages/ actually means
+What I proposed:
+
+
+Gabfix-ERP/
+  admin-dashboard/
+  gabfix-laundry-front-office/
+  gabfix-inhouse-erp/
+  packages/
+    theme/
+    ui-kit/
+    api-client/
+    auth-client/
+  server/
+What this does NOT mean:
+
+The three apps depend on each other at runtime, or need a shared server to render, or can't be deployed separately.
+
+What it DOES mean:
+
+The three apps share source code at build time, but each produces a fully self-contained deployment artifact at deploy time.
+
+Here is the mechanism:
+
+packages/theme and packages/ui-kit are source libraries, not running services. They contain .css, .tsx, .ts files only.
+Each app declares them in its own package.json as file:../packages/theme dependencies.
+When you run npm run build in gabfix-laundry-front-office/, Vite bundles copies of the theme CSS + components it actually uses into that app's own dist/ folder.
+That dist/ folder is then deployed independently - e.g.:
+admin.gabfix.com <- admin-dashboard/dist
+counter.gabfix.com or tablet kiosk <- gabfix-laundry-front-office/dist
+field.gabfix.com <- gabfix-inhouse-erp/dist
+At runtime, there is zero cross-app import. If you shut down Admin, Laundry and Inhouse keep running. If you delete admin-dashboard/, the other two still build.
+So: shared repository for storage + shared source for consistency, self-contained for deployment. This satisfies your requirement.
+
+The alternative you described (fully independent, no shared packages)
+This is a legitimate option. Let me compare honestly:
+
+A. Shared packages/ (my recommendation)	B. Fully independent apps (your description)
+Each app folder	Has its own package.json, node_modules, vite.config, dist. Self-contained deploy.	Same.
+Theme/buttons/tables	Written once in packages/, imported by all three. Fix a dark-mode bug once.	Copied into each app. Fix the same bug 3 times.
+erp_design.md compliance	Enforced by construction: one DataTable, one StatusBadge (Sections X1/X2/X3: "one source of truth").	Enforced by discipline: three copies that drift within months.
+Dark/Light mode	One token contract (Light_mode.md §3 + Dark_mode.md §3 ported to CSS variables). Toggle behaves identically everywhere.	Three token copies. Counter app ends up light-only, field app ends up with hardcoded colors - exactly the failure Light_mode.md P2 and Dark_mode.md D-P3 warn against.
+Build independence	Each app builds alone. packages/ is just local source, no network, no server.	Each app builds alone.
+Cost	Small upfront setup (workspace wiring, ~1 day in Phase 0a).	Zero setup, but ~15-25% extra effort on every UI phase because DataTable, badges, KPI cards, theme fixes are done 3x.
+Risk	Dev must understand file: deps. Mitigated by root setup script.	Design drift across apps. This is the higher long-term risk for an ERP.
+My proper explanation for keeping packages/: it does not violate self-containment. Think of it like three restaurants sharing one recipe book but each having its own kitchen, ingredients, and diners. The recipe book (packages/) never gets deployed - only the cooked meals (dist/ folders) get served.
+
+If you still prefer Option B after this, I will re-plan with vendored copies + a "design parity checklist" per phase. But I recommend A.
+
+What packages/theme plays in the architecture
+This is the direct implementation of your theme reference docs:
+
+Light_mode.md §3 token table (page #F5F5F5, card #FFFFFF, text #2D2D2D/#5A5A5A/#6B7280, sidebar white + divider per LD1) becomes :root { --surface-page: ...; --text-primary: ... }.
+Dark_mode.md §3 token table (frame #121212, base #1C1C1E, raised #2A2A2E, text #E8E8EA/#A8A8B0 per DD1) becomes [data-theme="dark"] { ... }.
+LD1-DD5 decisions (honest toggle + persistence, no hardcoded hex in views, print stays paper-white, off-white never pure #FFFFFF in dark, AA contrast) become code rules in one place instead of tribal knowledge in three apps.
+erp-design-system.md §§1-6 (Inter, 8px grid, type scale, functional color) + erp_design.md §3 (typography, status vocabulary) ride in the same package.
+Concretely packages/theme owns:
+
+
+packages/theme/
+  tokens.css        # :root + [data-theme=dark] variables
+  tailwind.preset.js # exposes tokens to all 3 tailwind configs
+  useTheme.ts       # light|dark|system + localStorage + OS default (Light L2 / Dark D3)
+  fonts/            # Inter (already in client, centralized)
+packages/ui-kit then consumes those tokens to build DataTable, StatusBadge, KpiCard, Modal, ConnectivityBar once. Each app imports what it needs and bundles its own copy.
+
+Deployment consequence: each app's dist/assets/*.css contains the full theme. No runtime fetch to another app. Offline PWA works because the theme is cached with its own shell.
+
+2. Dispatch board: is it on the dashboard too?
+Yes, but two different cuts of the same data - this is deliberate separation of concerns from enhance.md §11:
+
+Admin Dashboard: Dispatch (oversight)	Inhouse ERP: Dispatch / My Jobs (execution)
+Who	Owner / Manager / Dispatcher	Supervisor + Technicians
+Answers	"Is every job covered? What's at SLA risk? Who is idle?"	"What do I do today? What's blocked? How do I close it?"
+Sees	All jobs, all technicians, all branches. Full map, trails, geofences (enhance.md §14). Reassign anyone.	Scoped jobs only: WHERE job_assignments.employee_id = me (+ supervisor sees their crew). Own trail only (privacy rule).
+Actions	Assign, reassign, escalate, set promised_at, approve costs, fire manual reminders.	Accept, Start, Complete, Add cost, Add timesheet, Capture signature/photo.
+Data source	Same jobs + job_assignments + job_events + location_pings tables, same GET /api/jobs, GET /api/telemetry/live endpoints. Different JWT scope + query filter.	Same.
+Realtime	Full SSE stream (job.*, ping.*).	Filtered SSE stream (own jobs + crew).
+So there is one dispatch truth (server), two lenses:
+
+Admin lens = control tower.
+Inhouse lens = cockpit.
+The Laundry Front Office has no job dispatch - it has a laundry status board (Received → Washing → Drying → Ready → Collected), which is a different workflow on laundry_orders, not jobs.
+
+3. Folder naming: lowercase convention confirmed
+Agreed. Physical folders will be all-lowercase, no spaces (spaces break npm scripts, imports, and CI paths):
+
+Display title (in index.html + login screen)	Physical folder
+Gabfix Admin Dashboard	admin-dashboard/ (renamed from client/ via git mv, history preserved)
+Gabfix_Laundry_Front_Office	gabfix-laundry-front-office/
+Gabfix_Inhouse_ERP	gabfix-inhouse-erp/
+Package names match folders. Ports: 5173 / 5174 / 5175. This will be locked as Decision 1 (revised) in the plan.
+
+4. Laundry PWA: online-first or offline-first? Guidance
+You asked which direction updates should flow. There are two valid patterns - here is the guidance:
+
+Option 1: Online-first (try network, fall back to local)
+Every save tries POST /api/... first.
+If network fails, save to Dexie and queue.
+Pros: server numbers (LND-104, RCPT-201 from enhance.md §8 sequences) are immediate when online; less reconciliation logic.
+Cons: every network hiccup becomes a spinner / error at the counter. Staff learn "click twice when slow" → duplicates. During an outage the app feels broken even though it technically has a fallback. For a front counter with walk-in customers, this is the wrong feel.
+Option 2: Offline-first / local-first (my recommendation for the counter)
+Every save writes to Dexie first, UI confirms instantly (<50ms), then sync pushes to server in background.
+When online: push happens in ~1s, server ACK returns real number + PDF URL, DRAFT ticket auto-upgrades.
+When offline: rows stay pending, header shows ○ Offline — 3 waiting, counter keeps serving.
+Pros: counter never stops. Matches Dashboard guidelines §5 (freshness is honest: "Last synced 14:32") and erp_design.md empty/loading states (skeleton + retry, never dead page).
+Cons: requires temp-ID + idempotency design (already in the addendum §4: local-<uuid> + idempotency_key, numbers assigned server-side at push, DRAFT → authoritative reprint). This is ~2-3 days extra in Phase 1, already costed.
+Recommendation: offline-first for Laundry, online-first for the other two apps.
+
+Rationale:
+
+Laundry counter = queue of impatient humans + often a single shared tablet on shop WiFi. Downtime cost is immediate (lost sale, handwritten tickets that never enter the system).
+Admin = back office with stable internet; needs live ledger truth, so online-first + SSE is correct.
+Inhouse = field with intermittent signal, but jobs are multi-hour; a small outbox for pings + status changes is enough (already in enhance.md §14 beacon design). Full offline job editing is Phase 6+ scope creep - do not add it now.
+Money-safety note (extends enhance.md §15): offline payments are never auto-merged. Same idempotency_key dedupes retries; amount mismatches quarantine to Admin reconcile. This is why offline-first is safe for cash/MoMo at the counter.
+
+5. Dexie pruning: does it fetch deeper history from online?
+Yes - exactly. Pruning is local eviction, not server deletion. Clarified:
+
+Server is the permanent record. PostgreSQL keeps everything (subject to GPS_RETENTION_DAYS only for raw pings; orders/payments never auto-delete).
+Dexie is a working window. Keep: all open orders + last ~90 days synced/closed + ~500 recent customers + lookups. This keeps a low-end tablet fast (IndexedDB slows past ~10-20k rows with indexes).
+Pruning = delete local copies of rows that are synced AND collected AND older than 30 days. Pending/conflict/failed rows are never pruned.
+Deeper history is fetched on demand:
+Counter search for an old receipt → cache miss → GET /api/laundry?query=... (scoped, paginated per enhance.md §9) → result cached back into Dexie.
+GET /api/sync/pull?since= re-seeds anything evicted if needed (e.g., after reinstall, bounded 90-day seed pull).
+So the tablet feels infinite while storing finite.
+Think of it as: server = library, Dexie = desk. You keep today's files on the desk, archive finished ones back to the library, and fetch any old file in seconds when a customer asks.
+
+Parameters to lock (proposed defaults, tunable in Admin settings):
+
+Prune threshold: synced + collected + >30 days.
+Customer cache: last-500-used at this branch.
+Seed pull on fresh login: this branch, 90 days + all open.
+Revised locked decisions (for the plan document)
+Folders: admin-dashboard/, gabfix-laundry-front-office/, gabfix-inhouse-erp/ (lowercase); display titles keep your requested names.
+One server/, three self-contained Vite builds; packages/* is build-time source sharing, each dist/ deploys independently.
+Admin Dashboard owns access control (roles, app_scope, devices, provider keys, flags).
+Laundry FO is an offline-first PWA (Dexie local-first + POST /api/sync/push + GET /api/sync/pull + idempotency + DRAFT→authoritative numbering); Admin + Inhouse stay online-first.
+Dexie holds a branch-scoped working window with 30-day pruning; deeper history is pulled on demand; server is source of truth.
+If you approve these five, I will write them into the plan document (standalone multi-app-plan.md + pointer in enhance.md Appendix E, or into enhance.md directly - your earlier call was standalone) on the next Act-mode turn.
+
+Revised Locked Plan v3 — Renames + Laundry Stock-Keeping + jsPDF + Gabfix Portal
+Plan-mode update. No files changed. Incorporates your four directives on top of the Vercel-independent plan:
+
+inhouse-technician-client → inhouse-employee-client, display Gabfix Portal
+Laundry display title → Gabfix Laundry Front Office (spaces), plus stock-keeping + consumables + facility expenses scope
+Admin display → Gabfix Administrator
+PDF → jsPDF, kebab-case folders confirmed
+Reference docs applied: enhance.md §§5,8,9,11,12,15 + App.A/B/C, erp_design.md §§3–5,8, Light_mode.md/Dark_mode.md §3+L2/D3+P2, Dashboard guidelines.md §§1–5,9–10.
+
+1. Locked names (folders kebab, titles display)
+Folder (physical, Vercel Root Directory)	package.json name	Display title (index.html + login + manifest)	Dev port
+gabfix-administrator/ (via git mv client gabfix-administrator, history preserved)	gabfix-administrator	Gabfix Administrator	5173
+gabfix-laundry-front-office/	gabfix-laundry-front-office	Gabfix Laundry Front Office	5174
+inhouse-employee-client/	inhouse-employee-client	Gabfix Portal	5175
+Why gabfix-administrator/ and not keep admin-dashboard/: you haven't renamed yet, so one git mv lands directly on the final name; kebab-consistent with the other two; Vercel project URLs read cleanly. Display titles carry spaces/capitals — folders never do (npm + Vercel + imports break on spaces).
+
+Each folder remains fully independent: own package.json, node_modules, vite.config.ts (/api → localhost:4000 locally), tailwind.config.js, src/theme/tokens.css, src/components/*, src/lib/api.ts. Build command per Vercel project is npm run build scoped to that folder. No file:../ deps, no workspaces, no shared imports. Repo is shared storage only — your Vercel constraint stands.
+
+Vercel env per project: VITE_API_BASE_URL=https://<server-host>/api, VITE_APP_ID=admin|laundry|portal.
+
+2. What each app is now (separation of concerns)
+2.1 Gabfix Administrator — the only control plane
+Who: super user (owner) + assigned admins (manager, accountant). Super user creates/promotes/revokes admins; admins grant app_scope + branch_id + devices. No user-management UI exists anywhere else.
+
+Owns exclusively: roles/scopes/devices/sessions, provider keys, feature flags, dispatch board (full: all jobs, all staff, reassign, SLA risk, live map/trails/geofences/trips), ledger (CoA/journal/P&L/balance/cash-flow/aging), payments config + reconcile, assets + depreciation, costing review, commissions/targets/manager dashboard, templates + Inbox + CSAT + notification log, sync-health (laundry pending/failed/conflict), migrations/backup/sequences. Answers: "Are we healthy? Who can do what? What needs escalation?"
+
+2.2 Gabfix Laundry Front Office — counter kiosk + facility storekeeper (OFFLINE-FIRST PWA)
+Who: laundry role, branch-scoped by Administrator. Answers: "What comes in now? What's ready? What stock/expenses keep this shop running?"
+
+Two halves, one counter app:
+
+A. Laundry ops (as before): intake, status board Received→Collected, collect + receipt, ready/overdue lists, scoped bell, Last synced · N waiting + connectivity pill.
+
+B. Facility stock + running costs (NEW scope you added):
+
+Concern	FO gets	Administrator gets
+Facility supplies (detergents, packaging, spares, consumables)	Stock-on-hand list (this branch only), receive/issue/adjust movements, low-stock badges, restock request button	Full inventory_items + valuation + cross-branch transfers + supplier purchase + approval
+Restock flow	Create restock request offline → syncs → Admin approves/purchases → pull updates FO on-hand	Approve, PO, receive, cost posting to journal
+Facility expenses (rent, utilities, maintenance, fuel)	Capture expense offline (category, amount, receipt photo via multer id) → queued → Admin approves	Approve → journal posting → P&L; full expense reports
+Visibility	Inventory value, Low stock (n), Pending requests KPI strip (Dashboard §§2,9 tactical archetype)	Stock ledger, aging, cost-per-kg-washed analytics
+FO stock is a branch-scoped subset (inventory_items WHERE branch_id = me AND category IN (consumable, supply, packaging, spare)), never the whole catalogue. Same Dexie outbox + POST /api/sync/push + idempotency carries stock/expense ops (see §4). Admin remains the approver and the only journal writer (enhance.md §15 money-safety).
+
+2.3 Gabfix Portal (inhouse-employee-client/) — execution lens for ALL inhouse employees
+Rename is also a scope widening: not technicians-only but every employee with app_scope=portal. Role (from Administrator JWT) decides the view:
+
+Role	Portal shows
+technician	My Jobs (job_assignments.employee_id = me), stepper, Accept/Start/Complete, timesheets, cost capture, own trail, job cards
+sales	Own pipeline + quotes + my commission snapshot (no others' pipeline)
+supervisor (manager scoped to crew)	Crew jobs + accept/escalate-to-Admin + crew day view (no cross-branch reassign — that's Administrator dispatch)
+accountant (field)	Submit-only views (expenses/costs); no ledger
+All coordination (assign across staff, SLA policy, approvals, ledger, templates, provider config, full map) stays in Gabfix Administrator. Portal fires events (job.completed, cost submitted); Administrator owns consequences. Narrative arc per Dashboard §9: headline (today + risk) → rows (status badges) → one action per row.
+
+2.4 Updated concern matrix
+enhance §5 / new	Administrator	Laundry FO	Portal	Server owner
+Dates	full stepper/calendar/SLA	laundry dates	my timeline	job_events, 004/008
+Completion msg/feedback	templates/log/CSAT/Inbox	fires laundry.ready	fires job.completed	messaging, 009, scheduler
+GPS	full map/trails/geofences/audit	—	beacon + own trail	telemetry, 010
+Payments	config/reconcile/reports	collect + receipt	view job balance	payments, 005
+Assignment/dispatch	dispatch board (full)	—	my jobs + accept	job_assignments
+P/L/expenses/assets	full	capture facility expenses + submit	submit only	005/007, journal
+Costs	review/reports	consumable usage on laundry orders	capture timesheets/costs	006
+Stock (new)	full catalogue/valuation/PO	branch facility stock + restock requests	view job materials only	inventory_items, movements
+Sales/manager dash	full + commissions	—	own slice	attribution, commissions
+PDFs (jsPDF, §3)	all 12+stock+expense	ticket/receipt/stock-list/expense-slip	job card/delivery/trip	services/pdf-jsPDF
+Notifications/realtime	bell+Inbox+SSE→Socket.IO	scoped bell+SSE+sync state	scoped bell+SSE(+chat Ph.6)	event bus
+3. jsPDF replaces pdfkit — what changes
+Locked: jspdf + jspdf-autotable everywhere, one pinned version (e.g. jspdf@^2.5.2, verify at Phase 2 kickoff against registry) in server/ AND vendored into each app (same version, copied — not imported — per your Vercel rule).
+
+Why this fits your constraints better than pdfkit:
+
+Offline DRAFT tickets need client-side PDF. Laundry prints a ticket with no network. jsPDF runs in browser; pdfkit is Node-centric. Same jspdf+autotable in FO renders DRAFT (DRAFT local-…) instantly, server renders authoritative (LND-…/RCPT-…) on ACK with the mirrored layout function (copied source, version-pinned, parity-tested).
+Vercel-safe. No native deps, no Chromium, no font-tool chain. Prints stay paper-white (LD3/DD4), Inter embedded via base64 in both runtimes (covers —/· glyphs, tabular numerals per erp-design-system.md).
+One layout kit, three copies. services/pdf/ (server) + src/lib/pdfLayout.ts per app (vendored mirror): header(profile/logo), meta grid, items table (autotable), totals, footer + page numbers. Phase 2 exit gate adds "FO DRAFT and server authoritative render pixel-equivalent for same payload."
+enhance.md App.A entry swaps pdfkit → jspdf + jspdf-autotable (+ @types/jspdf if needed); DOCUMENT_STORAGE_DIR mirror + Content-Disposition: attachment + WhatsApp-document-by-URL behavior unchanged (§12). Document list grows to 14: the 12 + stock-list + facility-expense-slip.
+
+4. Laundry offline-first + Dexie + pruning (confirmed + extended for stock)
+Write path (all FO writes — orders, payments, stock movements, restock requests, facility expenses): Dexie first → instant confirm → POST /api/sync/push (idempotency_key) when online → ACK maps local-<uuid> → serverId + real number → mark synced. Offline: pending, ○ Offline — N waiting, counter never stops. Pull: GET /api/sync/pull?branch_id&since= (90-day bounded seed + open). Numbers never assigned offline (server document_sequences at push). Payments/expenses never auto-merge — quarantine to Administrator reconcile. Cached JWT gates UX offline, re-validated on every push/pull.
+
+Dexie (db.ts) adds two stores to the prior design: stock_items_cache (branch subset snapshot), stock_moves_outbox + expense_outbox (both via generic outbox op types stock_move, restock_request, facility_expense). Never stored: ledger, P&L, other branches, provider keys.
+
+Pruning = local eviction only; server is permanent. Prune synced + collected/approved + >30 days; never prune pending/conflict/failed. Deeper history always comes from online on demand — old receipt/stock-ledger search misses cache → scoped GET /api/...?query= → cached back; reinstall re-seeds via sync/pull. Desk-vs-library: tablet stays fast, history feels infinite.
+
+PWA shell unchanged: manifest (Gabfix Laundry Front Office, standalone, branch icons), vite-plugin-pwa SW (CacheFirst shell, StaleWhileRevalidate lookups, NetworkFirst pulls, /offline fallback with pending count + Retry), Background Sync, install prompt, both-themes contrast-checked pill (Light §6/Dark §6).
+
+5. Consistency without shared code (process, not imports)
+Light/Dark §3 token tables remain the source; each app vendors identical src/theme/tokens.css + identical useTheme (light|dark|system, localStorage, OS default, Topbar toggle). DataTable/StatusBadge/KpiCard/Modal/EmptyState/DateRangePicker/Timeline/MapView/ConnectivityBar/AuthGuard/RequireRole/Toast copied per app per erp_design.md §§3–5 build order; each phase gates on a parity checklist (same props/states/behaviors where used). API parity enforced by server contract tests against enhance.md §9. Cost of independence: ~+8–12d vendoring/parity over the single-app baseline (already in the 76–118d program estimate; stock scope adds ~+3–5d → ~79–123d).
+
+6. Delivery order (extends enhance.md §18)
+0a scaffolds (git mv client gabfix-administrator + two new apps + FO manifest/SW shell + root scripts + dep cleanup + baseline commit) → 0b theme/token vendoring + toggle + StatusBadge → 0c backend foundations (migrations 001–003 + app_scope, auth/scope middleware, route split, zod, numbering, Kampala dates, SSE, sync endpoints, CI) → 1 data spine + Dexie/outbox/temp-ID/conflicts (+ stock moves/restock/facility-expense tables) → 2 jsPDF kit + 14 docs + DRAFT→authoritative upgrade → 3 messaging/feedback/scoped bells → 4 field ops (Portal My Jobs/beacon, Administrator map) → 5–7 sales/manager, chat, gateway.
+
+7. Needs from you before Act mode
+Confirm folder gabfix-administrator/ (recommended) vs keeping admin-dashboard/.
+Confirm Portal roles in v1: technician + sales + supervisor only, or also field-accountant submit view?
+Confirm FO stock breadth: consumables/supplies/packaging/spares at branch (recommended) vs full catalogue offline?
+Confirm DRAFT-ticket display until ACK (recommended) vs pre-allocated number blocks?
+Unchanged defaults to ratify: double-entry ledger, shift-only GPS + 90-day retention, single FO build filtered by login branch_id, Meta verification starting day one.
+Proposed first Act slice: Phase 0a with the final names — rename + two scaffolds + per-app configs + root scripts + cleanup + baseline commit, diff shown before 0b/0c. Toggle to 
+Act Mode (⌘⇧A) when ready.
+
+
+i confirm 1, 2 the later is preferable, 3 the former, 4 former 5 affirmative, except we dont have branches, remove that. also we need one more app for managing the contract business store and utilities name it Gabfix Store and the folder gabfix-store. Change the app display name for the Admininstrator console to "Gabfix Admin Console".
+
+Locked Plan v4 — 4 Independent Apps, No Branches, jsPDF, Offline-First Laundry
+Plan-mode. No files changed. Locks in your confirmations + new Store app + Admin Console rename.
+
+1. Confirmations locked
+#	Your answer	Locked meaning
+1	Confirm gabfix-administrator/	git mv client gabfix-administrator, package gabfix-administrator, display Gabfix Admin Console (see §2)
+2	Later preferable	Gabfix Portal v1 roles = technician + sales + supervisor + field-accountant submit view
+3	Former	Laundry FO stock = consumables / supplies / packaging / spares subset — now single-shop, no branch filter (see §4)
+4	Former	Offline tickets/receipts print DRAFT local-… → auto-upgrade to authoritative LND-…/RCPT-… on sync ACK. No pre-allocated number blocks
+5	Affirmative, no branches	Double-entry ledger YES, shift-only GPS + 90-day retention YES, Meta verification day-one YES, branch concept removed everywhere (§4)
+6	New	Gabfix Store, folder gabfix-store, online-first, scope §3.4
+7	Rename	Administrator display "Gabfix Admin Console", folder stays gabfix-administrator/
+2. Final app registry
+Folder (Vercel Root Directory)	Package name	Display title	VITE_APP_ID	Dev port
+gabfix-administrator/	gabfix-administrator	Gabfix Admin Console	admin	5173
+gabfix-laundry-front-office/	gabfix-laundry-front-office	Gabfix Laundry Front Office	laundry	5174
+inhouse-employee-client/	inhouse-employee-client	Gabfix Portal	portal	5175
+gabfix-store/	gabfix-store	Gabfix Store	store	5176
+All four: fully independent Vite+React 18 apps. Own package.json, node_modules, vite.config.ts, tailwind.config.js, src/theme/tokens.css, src/components/*, src/lib/api.ts. npm run build per folder. No file:../, no workspaces, no shared imports. Repo = shared storage only. server/ deploys separately (Render/Railway/Fly/VPS + managed Postgres), frontends point via VITE_API_BASE_URL. CORS = 4 Vercel domains + localhost.
+
+3. What each app is
+3.1 Gabfix Admin Console — the only control plane
+Who: super user (owner) + assigned admins. Super user creates/promotes/revokes; admins grant app_scope (admin|laundry|portal|store), roles, devices, sessions. Zero user-management UI anywhere else.
+
+Exclusive: roles/scopes/devices/sessions, provider keys, flags, dispatch board (all jobs, all staff, reassign, SLA, live map/trails/geofences/trips), ledger (CoA/journal/P&L/balance/cash-flow/aging), payments config + reconcile, assets + depreciation, costing review, commissions/targets/manager dash, templates + Inbox + CSAT + log, sync-health (now per-device, not per-branch), stock valuation + purchase approval, migrations/backup/sequences. Answers: "Are we healthy? Who can do what? What needs escalation?"
+
+3.2 Gabfix Laundry Front Office — counter + facility storekeeper, OFFLINE-FIRST PWA
+Who: laundry role. Answers: "What comes in now? What's ready? What keeps this shop running?"
+
+A. Laundry ops: intake, board Received→Collected, collect + receipt, ready/overdue, scoped bell, Last synced · N waiting + pill. B. Facility running: on-hand consumables/supplies/packaging/spares, receive/issue/adjust, low-stock badges, restock requests, facility-expense capture (rent/utilities/maintenance/fuel + receipt photo) → queued offline → Admin approves → journal. KPI strip Inventory value / Low stock (n) / Pending requests (Dashboard §§2,9 tactical).
+
+3.3 Gabfix Portal (inhouse-employee-client/) — execution for all inhouse employees
+Role (Admin-issued JWT)	Portal sees
+technician	My Jobs (job_assignments.employee_id = me), stepper, Accept/Start/Complete, timesheets, cost capture, own trail, job cards
+sales	Own pipeline/quotes/commission only
+supervisor (manager scoped to crew)	Crew day view, accept/escalate-to-Admin. No cross-crew reassign
+accountant field view (your Q2 lock)	Submit-only: expenses/costs in, no ledger out
+All coordination stays in Admin Console. Portal fires events; Admin owns consequences.
+
+3.4 Gabfix Store — contract-business store + utilities (NEW, online-first)
+Who: storekeeper (new role — see §5) + manager/accountant (Admin-scoped). Answers: "What do we have, what left the shelf, what must we restock, what did utilities cost?"
+
+Concern	Store gets	Admin Console gets	Portal / Laundry get
+Contract materials (cement, pipes, fittings, electricals, finishes)	Stock-on-hand, receive/issue-to-job/adjust, goods-received/issued slips (jsPDF), low-stock, restock/purchase requests, supplier list (read + propose)	Approve PO, valuation, supplier master, journal posting, cross-check vs job_costs	Portal: request materials for my job, view availability only
+Tools & equipment checkout	Check-out/in to employee + job, due-back, condition note	Asset register + depreciation (assets stay Admin)	Portal: my checked-out tools
+Utilities + store running costs (power, water, fuel, transport, maintenance)	Capture + meter readings + slips	Approve → journal → P&L	—
+Reports	Stock list, movement ledger, low-stock, request status	Valuation, cost-per-job, supplier spend	—
+Deliberately online-first (stable store PC, needs live quantities + valuation; no Dexie full replica — only a small read cache of item list). Fence vs Laundry: Store = contract division; Laundry FO = laundry facility consumables. No auto-transfer in v1 (future: Store issues detergents/packaging to Laundry via internal request — flagged as Phase 5+ candidate, needs your approval later).
+
+4. No-branches removal — what changes in the plan
+enhance.md assumed branches + branch_id on employees/jobs/laundry/payments/journal. Removed:
+
+No branches table, no branch_id columns, no branch_id JWT claim, no branch filter on any endpoint.
+GET /api/sync/pull?since= (no branch_id); seed pull = whole shop, 90 days + open.
+Dexie customers_cache = last-500-used shop-wide; stock_items_cache = facility subset shop-wide.
+Admin sync-health grouped by device/user, not branch. Roles/scopes stay (they are not branches).
+Migration 003_identity + 004/005/008 drop branch_id; fresh-install seed has one shop profile. If a branches table already exists in a dev DB, Phase 0c ships a 00x_drop_branches.sql that nulls-migrates data to the single shop then drops the table (safe because single facility).
+5. Identity update (Admin-owned)
+
+employees.role  owner | manager | sales | technician | laundry | accountant | storekeeper (NEW)
+employees.app_scope[]  admin | laundry | portal | store
+devices  msisdn ↔ employee_id, active
+Super user (owner) → assigns admins → admins assign all else. Every login returns {role, app_scope[], }; each app's AuthGuard + server requireScope() reject foreign scopes. GPS privacy unchanged (shift-only, 90-day, full map Admin-only).
+
+6. jsPDF (locked, v3 carry-over)
+jspdf + jspdf-autotable, one pinned version in server/ and vendored copies per app (same version, copied source — Vercel-safe, no native/Chromium). Server services/pdf/ + per-app src/lib/pdfLayout.ts mirror: header, meta grid, autotable items, totals, footer. Print stays paper-white (LD1-DD5/LD3). 14 docs: 12 (enhance.md §12) + stock-list + facility/store-expense-slip. Phase 2 gate: FO DRAFT ≡ server authoritative for same payload.
+
+7. Integrations — where each lives (all in server/, all apps consume)
+WhatsApp Cloud + Twilio fallback + Africa's Talking SMS + SMTP (completion/appreciation/receipts, 009 + scheduler) · SSE→Socket.IO (GET /api/events, scoped bells; chat Ph.6 Admin↔Portal, Store read-only thread) · telemetry ingest + rollups + geofences (Portal beacon → Admin map) · manual payments now, Pesapal/Flutterwave Ph.7 behind PaymentProvider · jsPDF + storage mirror + WhatsApp-document-by-URL · JWT/scope auth · POST /api/sync/push + GET /api/sync/pull + idempotency_keys (Laundry offline; Store/Portal online) · node-cron→BullMQ later, pino/helmet/rate-limit/zod/multer. Provider lead times unchanged (enhance.md §6.8): Meta verification + number + templates + HTTPS + sender-ID start day one.
+
+8. Theme/components without shared code (process parity)
+Light/Dark §3 tables = source; each app vendors identical src/theme/tokens.css (:root light + [data-theme=dark]) + identical useTheme (system/light/dark, persist, Topbar toggle). StatusBadge → type/numerics → DataTable (long pole) → KpiCard/PageHeader/Modal/EmptyState/DateRangePicker/Timeline/MapView/ConnectivityBar/AuthGuard/RequireRole/Toast copied per app per erp_design.md §§3–5,8 + Dashboard §§4–7,10. Each phase gates on a parity checklist + server contract tests (enhance.md §9).
+
+9. Delivery + effort
+0a four independent scaffolds (git mv client gabfix-administrator + 3 new; FO manifest/SW shell day one; root scripts; dep cleanup; baseline commit) → 0b token/toggle/StatusBadge vendoring → 0c backend foundations (migrations incl. no-branch + app_scope + storekeeper, auth/scope, route split, zod, numbering, Kampala dates, SSE, sync endpoints, CI) → 1 spine + Dexie/outbox/conflicts + stock/moves/restock/facility-expense + Store inventory tables → 2 jsPDF 14 docs + DRAFT→authoritative → 3 messaging/scoped bells → 4 field ops → 5–7 sales/manager, chat, gateway. Program ~84–131 dev-days single-dev (prior 79–123 + Store ~5–8), provider waits excluded. Top risks: Meta verification, 102KB App.tsx × 4-way split (hence 0a/0b first), scope creep (§3 matrix is the fence).
+
+10. Remaining questions before Act mode
+Store↔Laundry transfers in v1 or future (recommended future)?
+storekeeper as new role (recommended) vs reuse manager?
+Store utilities breadth: power/water/fuel/transport/maintenance (recommended) — anything else?
+Doc target: standalone multi-app-plan.md + pointer in enhance.md App. E (recommended) vs into enhance.md?
+Proposed first Act slice: Phase 0a with final names — rename + three scaffolds + per-app configs + root scripts + cleanup + baseline commit, diff shown first. Toggle to 
+Act Mode (⌘⇧A) when ready.
+
+Gabfix Portal (inhouse-employee-client/) — Plan Referencing Your Employee Board
+Plan Mode — no changes made. Repo checked read-only: client/ still monolith, inhouse-employee-client/ + gabfix-administrator/ do not exist yet.
+
+Reference received: 9819842… for Employee Portal.
+
+Honesty note on the image: I fetched the URL — cdn.dribbble.com/userupload/... returns raw image/png bytes (171KB). My fetch tool dumps PNG binary, it cannot vision-render pixels. So I have not seen your board at pixel level. The plan below maps the standard employee-dashboard pattern (compact sidebar + personal header + "my day" KPI strip + task list + detail drawer — consistent with your Admin/Store/Laundry boards + erp-design-system.md §5) onto Gabfix Portal, and marks every assumption for you to correct. For pixel-exact replication, upload the PNG to docs/refs/portal-9819842.png and I will re-plan against it in Act mode.
+
+Locked registry (v4, your confirmations):
+
+Folder	Display Title	Vercel Root	Port	Mode
+inhouse-employee-client/	Gabfix Portal	inhouse-employee-client	5175	online-first + tiny beacon outbox
+gabfix-administrator/	Gabfix Admin Console	gabfix-administrator	5173	control plane
+gabfix-laundry-front-office/	Gabfix Laundry Front Office	gabfix-laundry-front-office	5174	offline-first PWA (Dexie)
+gabfix-store/	Gabfix Store	gabfix-store	5176	online-first
+No shared source at build time — each Vercel project builds npm run build scoped to its folder. No file:../. Server stays single API.
+
+1. What Gabfix Portal Is (and Is Not)
+Who: all inhouse employees with app_scope=portal, role from Admin Console JWT (technician | sales | supervisor | accountant-field | storekeeper-requestor). Answers: "What are my jobs today? What's blocked? How do I close it?"
+
+Portal gets (execution lens):
+
+Home / My Day: today's jobs + SLA risk + one action per row (Accept / Start / Complete / Add cost) — Dashboard guidelines §9 narrative arc: headline → why → what now.
+My Jobs list (scoped WHERE job_assignments.employee_id = me; supervisor sees crew; sales sees own pipeline/quotes/commission; field-accountant sees submit-only).
+Job detail drawer: job_events stepper Quote→Scheduled→Started→Completed→Invoiced→Paid (enhance.md §8), timeline, costs, materials, photos/signature (multer), job card / delivery-note / trip PDF via vendored jsPDF mirror.
+Timesheets (start/stop, employees.hourly_rate), job-cost capture (materials/fuel/subcontractor => job_costs + cost_categories), expense submit (Admin approves → journal, enhance.md §15).
+Materials: request from Store / view availability only (no stock edit — Store owns).
+Tools: my checked-out tools view (Store owns checkout).
+Beacon: minimal /field shift ping (POST /api/telemetry/pings), own-trail only. Full map stays Admin (privacy rule: shift-only, 90-day, Admin-only full map).
+Scoped bell + SSE (GET /api/events filtered to own jobs/crew) + Last synced pill (online-first, so pill is freshness, not outbox depth).
+Portal explicitly does NOT get: dispatch of others, cross-crew reassign, ledger/CoA/journal, P&L, provider keys/templates editing, user/device management, full staff map, asset register edit, other divisions' finance. All in Gabfix Admin Console (super-user → admins → scopes). This is your "all admin/coordination at admin level" lock.
+
+Board mapping (assumption — correct with screenshot if wrong):
+
+Left compact nav (icons + labels, collapsible): Home, My Jobs, Calendar, Costs/Timesheets, Materials, Tools, Expenses, Notifications, Profile.
+Topbar: search (scoped to my jobs), date/period chip, theme toggle, connectivity pill, bell, avatar + role badge.
+Home: 3-4 personal KPI cards (Today / Overdue / In-progress / Hours this week — clickable → filter, Dashboard §2), then "Today's route" list + blocked/risk rail, then detail drawer on row click.
+Mobile-first: stacked cards below md, 44px targets on field actions, skeleton matching card rhythm, offline-tolerant queue for Start/Complete/ping with "Waiting to sync (N)".
+2. Design Contract (vendored per app, no shared import)
+Per Light_mode.md §3 + Dark_mode.md §3 → inhouse-employee-client/src/theme/tokens.css (:root light: page #F5F5F5, card #FFFFFF, text #2D2D2D/#5A5A5A/#6B7280, sidebar white + divider LD1; [data-theme=dark] frame #121212, base #1C1C1E, raised #2A2A2E, text #E8E8EA/#A8A8B0 DD1). Rules LD1-DD5: semantic roles only, no hex in views (Light P2), print/PDF paper-white (LD3/DD4), AA contrast both themes, honest toggle + persist + OS default (L2/D3) via local useTheme. Inter + tabular numerals + 8px grid (erp-design-system.md §§1-4). Status color functional only (§6). Field use = dark mode matters (glare/battery) + high-contrast primary actions.
+
+Component order per erp_design.md §8 (copied into Portal, parity-checked vs Admin/Store/Laundry): StatusBadge → type/numerics → DataTable (sticky header, sort, right numerics, totals, "Showing N of M", empty/skeleton/error) → KpiCard → PageHeader → Modal (role=dialog, trap, Esc) → Timeline (job_events stepper) → MapView (own-trail only) → ConnectivityBar → AuthGuard/RequireRole → Toast.
+
+3. Integrations (all code in server/, Portal consumes)
+Integration	Portal use	Server owner (enhance.md ref)
+Auth JWT {role, app_scope[]} + requireScope('portal')	AuthGuard, role views, branch-less scoping	§6.6 + §8.2 + 003_identity (+storekeeper)
+Jobs/assignment/events	My Jobs, stepper, Accept/Start/Complete	004, job_assignments, job_events, §9 Jobs
+Timesheets/costs/expenses	Capture + submit	006, timesheets, job_costs, §15
+Store link	Request materials, availability read, my tools	inventory_items/movements, tool_checkouts
+Telemetry	Beacon ping, own trail	010, POST /api/telemetry/pings
+Messaging	Fires job.completed → Admin-owned template + PDF + feedback link; no template editing in Portal	009, scheduler, §13
+Realtime SSE → Socket.IO Ph.6	Scoped bell, live job updates; chat Admin↔Portal	GET /api/events, §6.2
+jsPDF + autotable (locked, replaces pdfkit)	Job card / delivery / trip (vendored src/lib/pdfLayout.ts mirror, same pinned version as server)	services/pdf/, §12 (14 docs)
+Vercel env: VITE_API_BASE_URL, VITE_APP_ID=portal. CORS allowlist includes portal domain. No secrets in frontend.
+
+4. Build Plan (Portal slice of v4 phases)
+Phase	Portal work	Acceptance
+0a scaffold	Create inhouse-employee-client/ from Vite+React18 template; own configs; root dev:portal 5175; manifest minimal (installable, no full PWA shell — Portal is online-first)	npm run build inside folder alone passes; Vercel root set
+0b theme	Vendor tokens + useTheme + StatusBadge + type/numeric pass	Toggle parity with Admin; no hardcoded hex; contrast pass
+0c backend	app_scope=portal, requireScope, scoped GET /api/jobs?assignee=me, SSE filtered	Foreign-scope token rejected; Tech A cannot see Tech B jobs
+1 spine	My Jobs + stepper + timesheets + cost capture + expense submit + material request	Start→Complete posts job_events; cost rolls to jobs.cost (replaces 36% hack)
+2 PDF+tables	DataTable + jsPDF job card/delivery/trip	Printed card ≡ server PDF for same payload
+3 realtime	Scoped bell, completion payload, /feedback/:token fires from Portal completes	Complete → customer WhatsApp with order+cost+PDF+link; bell persists
+4 field	Beacon + own trail + small status/ping outbox (retry, no full Dexie)	Airplane toggle mid-shift → queued pings sync, no dupes
+5–7	Own-pipeline (sales), crew view (supervisor), submit view (field-accountant); chat Ph.6	Role views verified per JWT
+No branches anywhere: drop branchId from types/schema/endpoints (00x_drop_branches.sql if dev DB has it). DRAFT-numbering is Laundry-only; Portal creates no numbers offline.
+
+5. Tradeoffs / Risks
+Online-first + tiny outbox vs full Dexie (Laundry pattern): full offline doubles Portal cost for little gain (jobs are multi-hour, store PC stable, field signal intermittent but tolerable). Chosen: outbox only. If you later demand full offline job editing, cost +4–6d.
+Board fidelity without pixels: I build to erp-design-system patterns now; pixel-tune after you drop PNGs in docs/refs/.
+Scope creep (technicians asking for dispatch/reassign): fenced by §1 matrix — redirect to Admin Console.
+6. What I Need Before Act Mode
+Confirm 9819842 mapping in §1 (or upload PNG to docs/refs/).
+Confirm Portal v1 roles = technician + sales + supervisor + field-accountant submit (your Q2 lock) — add store-requestor?
+Chart lib allowed (recharts) or SVG-only for Hours/cost mini-trends?
+Doc target: standalone multi-app-plan.md + pointer in enhance.md App.E (recommended) vs into enhance.md?
+Next: toggle to 
+Act Mode (⌘⇧A) → Phase 0a with final names (gabfix-administrator/, gabfix-laundry-front-office/, inhouse-employee-client/, gabfix-store/) + docs/refs/ + baseline commit, diff shown before 0b/0c.
+
+
+
+how can I make you see the baords
+
+
+You can make me see the boards 2 ways — either works, option 1 is fastest:
+
+Option 1 — Attach the images right here in chat (recommended)
+
+Open each Dribbble link in your browser and download/save the image (right-click → Save image).
+Drag-and-drop or paste the PNG/JPG files directly into your next message to me here.
+I can view images attached to a message — that's different from the URL fetch, which only returned raw PNG binary I can't render.
+Send them labeled, e.g.:
+
+admin-1.png, admin-2.png … (the 5 admin boards)
+store-1.png
+laundry-1..4.png
+portal-1.png
+Option 2 — Drop them in the repo and tell me the paths
+
+Save the files under c:\Users\manue\Desktop\gabfix\FinanceMgt\Gabfix-ERP\docs\refs\ (create the folder if needed), e.g.:
+docs/refs/admin-1.png … docs/refs/admin-5.png
+docs/refs/store-1.png
+docs/refs/laundry-1.png … laundry-4.png
+docs/refs/portal-1.png
+Just tell me "images are in docs/refs" — I have an image-read tool for local files, so I can open each one and re-plan the Admin / Store / Laundry / Portal layouts against actual pixels instead of patterns.
+Why the links didn't work: cdn.dribbble.com/... serves raw image/png bytes and my web-fetch tool dumps them as binary text — I never get a viewable picture. An attached or repo-local image file I can see.
+
+Once I can see them, I'll update the plan per board: sidebar/header/KPI/chart/table mapping for Gabfix Admin Console, Gabfix Store, Gabfix Laundry Front Office, and Gabfix Portal — and flag anything in your current client/ that conflicts.
+
+
+
+
+

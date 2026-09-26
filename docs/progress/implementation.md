@@ -68,4 +68,7 @@ server-side numbering; local-time dates correct; CI enforced.
 | 2026-09-25 | Phase 0.5 done: `middleware/auth.ts` (signTokens/verifyToken/requireAuth/requireRole, staged `guard()` behind `AUTH_ENFORCE`) and `routes/auth.ts` (login/refresh/logout/me) wired into `index.ts`; duplicate `/api/health` route removed; `/api/import` and `/api/reset` are owner-only under enforcement; 13/13 acceptance checks pass with the flag on, unchanged behaviour with it off (default) |
 | 2026-09-25 | Phase 0.6 done: `server/index.ts` reduced to 60 lines of wiring; the 13 handlers moved to one router per domain (`server/routes/*`) backed by `server/repositories/*` (SQL) and `server/lib/*` (table metadata, HTTP helpers). 43-check parity probe, 14-check enforcement probe and 11-check identity probe all pass; client production build green. Fixed identity loss: `TRUNCATE … CASCADE` used to delete `employees`/`devices` on `/api/reset` and `/api/import` |
 | 2026-09-25 | Phase 0.7 done: Per-route Zod schemas replacing the generic column map (`server/validation/*`). Replaced unsafe `z.coerce.number()` with `z.preprocess()` so null and empty strings fail with 422; backup import reports array-indexed field paths (e.g. `branches[0].unknown_col`) and rolls back on failure; empty PATCH bodies return 422; live 44-probe check passed and client build clean |
+| 2026-09-26 | Phase 0a: `git mv client gabfix-administrator` (keeps git history); scaffolding 3 new apps + shared packages; root dev scripts; per-app vite.config.ts + tailwind + theme tokens |
+
+
 

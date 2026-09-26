@@ -2,15 +2,24 @@
   "name": "gabfix-erp",
   "private": true,
   "version": "0.0.0",
+  "workspaces": [
+    "gabfix-administrator",
+    "gabfix-laundry-front-office",
+    "gabfix-inhouse-erp",
+    "gabfix-store"
+  ],
   "scripts": {
-    "setup": "npm --prefix client install && npm --prefix server install",
+    "setup": "npm --prefix gabfix-administrator install && npm --prefix gabfix-laundry-front-office install && npm --prefix gabfix-inhouse-erp install && npm --prefix gabfix-store install && npm --prefix server install",
     "dev": "node scripts/dev.mjs",
-    "dev:client": "npm --prefix client run dev",
+    "dev:admin": "npm --prefix gabfix-administrator run dev",
+    "dev:laundry": "npm --prefix gabfix-laundry-front-office run dev",
+    "dev:portal": "npm --prefix gabfix-inhouse-erp run dev",
+    "dev:store": "npm --prefix gabfix-store run dev",
     "dev:server": "npm --prefix server run dev",
     "db:init": "npm --prefix server run db:init",
     "db:migrate": "npm --prefix server run db:migrate",
-    "build": "npm --prefix client run build",
-    "lint": "npm --prefix client run lint",
-    "typecheck": "npm --prefix client run typecheck && npm --prefix server run typecheck"
+    "build": "npm --prefix gabfix-administrator run build && npm --prefix gabfix-laundry-front-office run build && npm --prefix gabfix-inhouse-erp run build && npm --prefix gabfix-store run build",
+    "lint": "npm --prefix gabfix-administrator run lint && npm --prefix gabfix-laundry-front-office run lint && npm --prefix gabfix-inhouse-erp run lint && npm --prefix gabfix-store run lint",
+    "typecheck": "npm --prefix gabfix-administrator run typecheck && npm --prefix gabfix-laundry-front-office run typecheck && npm --prefix gabfix-inhouse-erp run typecheck && npm --prefix gabfix-store run typecheck && npm --prefix server run typecheck"
   }
 }

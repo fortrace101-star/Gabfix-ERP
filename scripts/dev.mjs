@@ -1,4 +1,4 @@
-// Runs the client (Vite) and server (Express) dev processes concurrently.
+// Runs the admin app (Vite) and server (Express) dev processes concurrently.
 // No dependencies: spawns both with npm and prefixes their output.
 import { spawn } from 'node:child_process';
 
@@ -6,7 +6,7 @@ const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 const procs = [
   { name: 'server', args: ['--prefix', 'server', 'run', 'dev'] },
-  { name: 'client', args: ['--prefix', 'client', 'run', 'dev'] },
+  { name: 'admin', args: ['--prefix', 'gabfix-administrator', 'run', 'dev'] },
 ].map(({ name, args }) => {
   const child = spawn(npm, args, { shell: true, env: process.env });
 
