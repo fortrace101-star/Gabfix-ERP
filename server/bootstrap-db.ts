@@ -42,7 +42,7 @@ export async function ensureDatabase(): Promise<void> {
   const applied = await migrate(client);
   if (applied.length) console.log(`[db] Migrations applied: ${applied.join(', ')}`);
 
-  const { rows } = await client.query(`SELECT COUNT(*)::int AS count FROM branches`);
+  const { rows } = await client.query(`SELECT COUNT(*)::int AS count FROM customers`);
   if (rows[0].count > 0) {
     console.log('[db] Data already present, skipping seed');
   } else {

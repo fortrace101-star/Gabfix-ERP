@@ -59,18 +59,6 @@ const importRow = <T extends z.ZodObject<z.ZodRawShape>>(create: T) =>
   create.partial().extend({ id: idText.optional() });
 
 /**
- * branches — only ever written by a backup import or the demo seed today.
- */
-export const branchesResource: Resource = {
-  table: 'branches',
-  dataKey: 'branches',
-  label: 'branch',
-  columns: { name: 'name', location: 'location' },
-  create: z.strictObject({ name: text, location: optionalText.optional() }),
-  row: importRow(z.strictObject({ name: text, location: optionalText.optional() })),
-};
-
-/**
  * customers — name and phone open an account; everything else is optional.
  */
 const customerCreate = z.strictObject({
@@ -126,7 +114,6 @@ export const servicesResource: Resource = {
 const jobCreate = z.strictObject({
   number: text.optional(),
   customerId: idText,
-  branchId: idText,
   serviceId: idText,
   date: dateText,
   status: jobStatus.optional(),
@@ -143,7 +130,6 @@ export const jobsResource: Resource = {
   columns: {
     number: 'number',
     customerId: 'customer_id',
-    branchId: 'branch_id',
     serviceId: 'service_id',
     date: 'date',
     status: 'status',
@@ -175,7 +161,6 @@ const expenseCreate = z.strictObject({
   category: text,
   description: text,
   amount: money,
-  branchId: idText,
   division: optionalText.optional(),
   date: optionalDateText,
 });
@@ -188,7 +173,6 @@ export const expensesResource: Resource = {
     category: 'category',
     description: 'description',
     amount: 'amount',
-    branchId: 'branch_id',
     date: 'date',
     division: 'division',
   },
@@ -203,7 +187,6 @@ const equipmentCreate = z.strictObject({
   name: text,
   serialNumber: text,
   type: optionalText.optional(),
-  branchId: idText,
   value: money,
   bookValue: optionalMoney,
   condition: optionalText.optional(),
@@ -219,7 +202,6 @@ export const equipmentResource: Resource = {
     name: 'name',
     serialNumber: 'serial_number',
     type: 'type',
-    branchId: 'branch_id',
     value: 'value',
     bookValue: 'book_value',
     condition: 'condition',
@@ -233,7 +215,6 @@ export const equipmentResource: Resource = {
       name: text.optional(),
       serialNumber: text.optional(),
       type: optionalText.optional(),
-      branchId: idText.optional(),
       value: optionalMoney,
       bookValue: optionalMoney,
       condition: optionalText.optional(),
@@ -256,7 +237,6 @@ const inventoryCreate = z.strictObject({
   quantity: optionalMoney,
   minimum: optionalMoney,
   cost: optionalMoney,
-  branchId: idText,
 });
 
 export const inventoryResource: Resource = {
@@ -270,7 +250,6 @@ export const inventoryResource: Resource = {
     quantity: 'quantity',
     minimum: 'minimum',
     cost: 'cost',
-    branchId: 'branch_id',
   },
   create: inventoryCreate,
   patch: atLeastOneField(
@@ -281,7 +260,6 @@ export const inventoryResource: Resource = {
       quantity: optionalMoney,
       minimum: optionalMoney,
       cost: optionalMoney,
-      branchId: idText.optional(),
     }),
   ),
   row: importRow(inventoryCreate),
@@ -348,7 +326,6 @@ export const laundryResource: Resource = {
  * while a backup is restored.
  */
 export const RESOURCES: Resource[] = [
-  branchesResource,
   customersResource,
   servicesResource,
   jobsResource,

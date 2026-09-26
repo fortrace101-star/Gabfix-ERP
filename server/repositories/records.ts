@@ -27,9 +27,10 @@ export async function updateRecord(resource: Resource, id: string, data: Record<
 }
 
 /**
- * Tables that a workspace wipe must never lose. `employees.branch_id` references
- * `branches`, so `TRUNCATE ... CASCADE` reaches identity rows (and `devices`
- * through `employees`) even though they are not in TRUNCATE_TABLES.
+ * Tables that a workspace wipe must never lose. Kept after 006 removed the
+ * last inbound foreign key (employees.branch_id -> branches): TRUNCATE CASCADE
+ * only reaches what still references, but the snapshot/restore is cheap
+ * insurance against future schema additions re-introducing the hazard.
  */
 const IDENTITY_TABLES = ['employees', 'devices'];
 

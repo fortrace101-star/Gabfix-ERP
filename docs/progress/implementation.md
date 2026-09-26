@@ -6,7 +6,7 @@
 | Requirements | [`docs/requirements.md`](../requirements.md) |
 | Baseline commit | `100d0aa` (Pre-refactor baseline snapshot before enhancement work) |
 | Started | 2026-09-25 |
-| Status | Phase 0a complete · Phase 0b complete · Phase 0c in progress (0c.1 done: identity scopes + sync tables + auth/CORS; 006 remove-branches and §0.9–0.12 remaining) |
+| Status | Phase 0a complete · Phase 0b complete · Phase 0c in progress (0c.1 + 0c.2a done: identity scopes, sync tables, auth/CORS, branches removed; §0.9–0.12 remaining) |
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -20,7 +20,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | --- | --- | --- | --- |
 | Phase 0a | Multi-app scaffold | Rename `client/` → `gabfix-administrator`; scaffold 3 new Vite+React 18 apps; per-app configs; root dev scripts; ports 5173–5176 | ✅ done |
 | **Phase 0b** | **Theme, components & PWA shells** | **Vendored theme tokens; `useTheme` hook; `StatusBadge` component; PWA manifests + sw; `.env` with `VITE_APP_ID`** | **✅ done** |
-| Phase 0c | Backend multi-app wiring | `005_multiapp_identity` + `006_remove_branches` + `sync_tables` migrations; server identity/roles scoped to 4 apps; §0.9 dates, §0.10 client split, §0.11 SSE, §0.12 CI completion | 🔄 0c.1 done (005+sync tables, requireScope, CORS) · 006 + §0.9–0.12 remaining |
+| Phase 0c | Backend multi-app wiring | `005_multiapp_identity` + `006_remove_branches` + `sync_tables` migrations; server identity/roles scoped to 4 apps; §0.9 dates, §0.10 client split, §0.11 SSE, §0.12 CI completion | 🔄 0c.1 + 0c.2a done (branches removed) · §0.9–0.12 remaining |
 | Phase 1 | Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | — |
 | Phase 2 | PDF & documents | jsPDF + AutoTable, 14 document types, print/download/attach | — |
 | Phase 3 | Notifications, feedback, real-time | WhatsApp/SMS, completion message, feedback form, SSE | — |
@@ -29,7 +29,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | Phase 6 | Real-time upgrade | Socket.IO chat, Inbox, presence, live map | — |
 | Phase 7 | Depth | Payment gateway + reconciliation, scheduled reports, dunning | — |
 
-> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c 🔄 (0c.1 done — see Phase 0c section; `006_remove_branches` + admin branch-strip and §0.9–§0.12 remain). Phases 0.1–0.8 (baseline, migrations, identity, auth, handler split, zod, numbering) are also complete from prior work.
+> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c 🔄 (0c.1 + 0c.2a done — see Phase 0c section; §0.9–§0.12 remain: Kampala dates, client split, SSE, CI). Phases 0.1–0.8 (baseline, migrations, identity, auth, handler split, zod, numbering) are also complete from prior work.
 
 ---
 
@@ -185,11 +185,34 @@ Goal: one server, four apps — identity carries `app_scope`, routes are scope-g
 
 Probe methodology note: routers expose POST/PATCH only (reads via `/api/data`), so scope-allow assertions expect the request to pass the mount and reach validation (422 on empty body), not an HTTP 200 list.
 
-### 0c.2 — Remove branches + §0.9–§0.12 (next)
+### 0c.2a — Remove branches ✅ (single-shop conversion, plan decision #9)
+
+| Step | Work | Status | Notes |
+| --- | --- | --- | --- |
+| 0c.2a-1 | Migration `006_remove_branches.sql`: discover + drop every FK targeting `branches` from the catalog, drop `branch_id` on jobs/expenses/equipment/inventory_items/employees, drop `branches` | [x] | Constraint names are discovered via `pg_constraint`, not guessed (001 created the FKs inline with auto names) |
+| 0c.2a-2 | Seed data de-branched: branches insert removed; jobs/expenses/equipment/inventory seeds lose `branch_id` columns/values | [x] | Fresh databases are born branchless |
+| 0c.2a-3 | Read layer `db.ts`: `branches` dropped from `AppData` type + `getData()`; jobs/expenses/equipment/inventory selects lose `branch_id AS "branchId"` | [x] | `/api/data` payload now starts at `customers` |
+| 0c.2a-4 | Write layer: `branchesResource` deleted, `branchId` removed from job/expense/equipment/inventory create + column maps + patch schemas, removed from `RESOURCES` import order; `TRUNCATE_TABLES` loses `branches`; bootstrap empty-check now counts `customers` | [x] | Strict zod schemas now reject `branchId` with 422 instead of silently dropping it |
+| 0c.2a-5 | Admin app strip: `Branch` type + `branchId` fields + `branches` in `AppData` removed from `types.ts`; `App.tsx` loses the branch switcher state, Dashboard/JobsView/LaundryView/EquipmentView branch filters, Branch table column, Branch-performance report card + rows, Branch selects in Job/Expense/Equipment/Inventory forms, dead `.branch-switch` CSS, unused `Building2` import | [x] | Lint returned to the 21-error pre-existing baseline; new props `data` on forms no longer needed after losing the branch select |
+
+### 0c.2a Verification matrix
+
+| Check | Result |
+| --- | --- |
+| `npm run db:migrate` applies 006 on the existing dev DB | ✅ applied cleanly; schema probe 8/8 (branches table absent, 5× `branch_id` columns gone, data survived, `getData()` works) |
+| Fresh-DB bootstrap (`gabfix_006_test`, dropped afterwards) | ✅ 5/5 — migrations 001→007, branchless seed, owner ensured, sync tables present, zero `branch_id` columns |
+| Write-path probes (against live server) | ✅ 7/7 — job create without branchId → 201 with server-issued JOB number; `branchId` now 422; expense + inventory create → 201; `/api/reset` → 200, reseeds and keeps identity |
+| Server boot on migrated DB | ✅ no crash lines; `/api/data` returns the new shape (no `branches` key) |
+| Root `npm run typecheck` (4 apps + server) | ✅ exit 0 |
+| Admin lint / typecheck / build | ✅ 21 pre-existing lint errors (no new), tsc clean, `vite build` + PWA v0.21.2 green |
+| Dev stack boot/shutdown | ✅ all 4 Vite servers ready, API listening, ports freed after SIGINT |
+
+> Note: transient `[nodemon] app crashed` lines during development were restart churn from editing server files mid-surgery (code and schema briefly disagreeing); a clean boot after the migration applied shows no errors.
+
+### 0c.2 remainder — §0.9–§0.12 (next)
 
 | Step | Work | Status |
 | --- | --- | --- |
-| 0c.2a | Migration `006_remove_branches.sql`: drop `branch_id` from jobs/expenses/equipment/inventory_items/employees, drop `branches`, drop branch filters from validation + `db.ts` + `TRUNCATE_TABLES`, strip branch UI from admin (`App.tsx` switcher, table column, report, forms, laundry/equipment/inventory filters, seed data) | [ ] |
 | 0c.2b | §0.9 Africa/Kampala date handling (`server/lib/dates.ts`, admin `lib/dates.ts`) | [ ] |
 | 0c.2c | §0.10 admin client split (app/features/components/lib) | [ ] |
 | 0c.2d | §0.11 SSE event bus (`routes/events.ts`, `services/realtime.ts`) | [ ] |
@@ -203,7 +226,7 @@ Probe methodology note: routers expose POST/PATCH only (reads via `/api/data`), 
 | --- | --- | --- | --- |
 | 0a. Multi-app scaffold | 4 apps (admin + 3 new) + root scripts + per-app configs + ports | 2–3 d | [x] |
 | 0b. Theme, components & PWA shells | Vendored tokens + useTheme + StatusBadge + PWA manifests | 1–2 d | [x] |
-| 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; §0.9–0.12 | 3–5 d | [~] 0c.1 done |
+| 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; branches removed; §0.9–0.12 | 3–5 d | [~] 0c.1 + 0c.2a done |
 | 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [ ] |
 | 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [ ] |
 | 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [ ] |
@@ -241,6 +264,8 @@ Probe methodology note: routers expose POST/PATCH only (reads via `/api/data`), 
 | 2026-09-26 | Dev-env fix: `scripts/dev.mjs` shutdown now kills the whole child process tree (`taskkill /T /F` on Windows) instead of `child.kill()`, which orphaned vite/tsx processes that kept ports 5173–5176 + 4000 occupied and broke subsequent `npm run dev` runs ("Port 5174 is already in use"). Verified: clean startup on all ports, zero listeners after shutdown. Note: "vite-plugin-pwa not installed — PWA features disabled" warnings remain expected until the plugin is installed in each app dir |
 | 2026-09-26 | PWA enabled for real in all 4 apps: pinned `vite-plugin-pwa@^0.20.7` did not exist on npm (0.20.x ends at 0.20.5), so every `npm install` had failed silently behind the try/catch. Repinned to `^0.21.2` (peer-supports the apps' Vite 5.4), installed per-app, and removed the invalid `BackgroundSync` runtimeCaching entry from portal's vite config (workbox-build v7 rejects it and aborts the build; offline queueing belongs to the Dexie outbox per plan §6 and `/api/` NetworkFirst already covers `/api/beacon`). All 4 apps build green with `PWA v0.21.2` + `dist/sw.js` + manifest; the "PWA features disabled" warning is gone in dev |
 | 2026-09-26 | Phase 0c.1 done: `005_multiapp_identity.sql` (app_scope + storekeeper + owner=all-4 scopes + single-owner index), `007_sync_outbox.sql` (sync_outbox + feedback_requests), `requireScope` guard + `app_scope` in JWTs (pre-0c tokens fall back to admin scope), CORS allowlist (4 Vercel origins + 5173–5179, `CORS_ALLOW_ALL` escape hatch), scoped route mounts per plan §10.4. Verified: DB probe 8/8, API probe staged 5/5 + enforced 8/8, root typecheck clean; temp probes deleted |
+| 2026-09-26 | Phase 0c verification against live stack: baseline boot (5 processes, 0 PWA warnings, clean SIGINT shutdown, no orphans) and enforced-mode boot (AUTH_ENFORCE=true temporarily set then reverted): 401 without token through all four apps' `/api` proxies, owner JWT carries all 4 scopes, owner token → 200 through every proxy |
+| 2026-09-26 | Phase 0c.2a done — branches removed everywhere (single-shop per plan decision #9): `006_remove_branches.sql` drops catalog-discovered FKs + `branch_id` columns + `branches`; seed data, `db.ts`, validation resources, `TRUNCATE_TABLES`, bootstrap empty-check, and the admin app (types, branch switcher, filters, table column, Branch-performance report, form selects, dead CSS) all de-branched. Verified: schema probe 8/8, fresh-DB bootstrap 5/5, write-path probes 7/7 (branchId → 422, reset intact), root typecheck 0, admin lint back at 21-error baseline, admin build green with PWA. Temp probes deleted |
 
 
 

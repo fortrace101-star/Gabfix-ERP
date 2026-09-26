@@ -32,13 +32,6 @@ export async function ensureOwner(client: ClientBase): Promise<void> {
  */
 export async function seedData(client: ClientBase) {
   await client.query(
-    `INSERT INTO branches (id, name, location) VALUES
-      ('b1', 'Kampala Central', 'Plot 18, Kira Road'),
-      ('b2', 'Ntinda Branch', '23 Ntinda Industrial Area')
-     ON CONFLICT (id) DO NOTHING`
-  );
-
-  await client.query(
     `INSERT INTO customers (id, name, company, type, phone, email, balance, status) VALUES
       ('c1', 'Sarah Namuli', '', 'Residential', '+256 772 441 208', 'sarah@example.com', 0, 'Active'),
       ('c2', 'ABC Offices Ltd', 'ABC Offices Ltd', 'Corporate Client', '+256 701 820 445', 'admin@abcoffices.ug', 1250000, 'Active'),
@@ -69,13 +62,13 @@ export async function seedData(client: ClientBase) {
   );
 
   await client.query(
-    `INSERT INTO jobs (id, number, customer_id, branch_id, service_id, date, status, revenue, cost, assignees, equipment_usage) VALUES
-      ('j1', 'JOB-00142', 'c2', 'b1', 's3', '2026-09-03', 'In Progress', 650000, 280000, '{"Moses K.","Agnes N."}', '[]'),
-      ('j2', 'JOB-00141', 'c1', 'b1', 's2', '2026-09-03', 'Completed', 420000, 135000, '{"Sarah A."}', '[]'),
-      ('j3', 'JOB-00140', 'c5', 'b2', 's7', '2026-09-02', 'Scheduled', 450000, 95000, '{"John O."}', '[]'),
-      ('j4', 'JOB-00139', 'c4', 'b1', 's4', '2026-09-02', 'Completed', 220000, 70000, '{"Peter L."}', '[]'),
-      ('j5', 'JOB-00138', 'c3', 'b2', 's5', '2026-09-01', 'Completed', 540000, 260000, '{"David T."}', '[]'),
-      ('j6', 'JOB-00137', 'c8', 'b1', 's6', '2026-08-31', 'Quoted', 780000, 320000, '{}', '[]')
+    `INSERT INTO jobs (id, number, customer_id, service_id, date, status, revenue, cost, assignees, equipment_usage) VALUES
+      ('j1', 'JOB-00142', 'c2', 's3', '2026-09-03', 'In Progress', 650000, 280000, '{"Moses K.","Agnes N."}', '[]'),
+      ('j2', 'JOB-00141', 'c1', 's2', '2026-09-03', 'Completed', 420000, 135000, '{"Sarah A."}', '[]'),
+      ('j3', 'JOB-00140', 'c5', 's7', '2026-09-02', 'Scheduled', 450000, 95000, '{"John O."}', '[]'),
+      ('j4', 'JOB-00139', 'c4', 's4', '2026-09-02', 'Completed', 220000, 70000, '{"Peter L."}', '[]'),
+      ('j5', 'JOB-00138', 'c3', 's5', '2026-09-01', 'Completed', 540000, 260000, '{"David T."}', '[]'),
+      ('j6', 'JOB-00137', 'c8', 's6', '2026-08-31', 'Quoted', 780000, 320000, '{}', '[]')
      ON CONFLICT (id) DO NOTHING`
   );
 
@@ -90,13 +83,13 @@ export async function seedData(client: ClientBase) {
   );
 
   await client.query(
-    `INSERT INTO expenses (id, category, description, amount, branch_id, date, division) VALUES
-      ('e1', 'Payroll', 'August field team payroll', 4800000, 'b1', '2026-08-30', 'Company overhead'),
-      ('e2', 'Supplies', 'Cleaning chemicals & PPE', 1120000, 'b1', '2026-09-01', 'Cleaning Services'),
-      ('e3', 'Fuel', 'Field vehicles fuel', 680000, 'b2', '2026-09-02', 'Company overhead'),
-      ('e4', 'Repairs', 'Washer drain pump replacement', 350000, 'b2', '2026-08-29', 'Laundry'),
-      ('e5', 'Rent', 'September workspace rent', 1800000, 'b1', '2026-09-01', 'Company overhead'),
-      ('e6', 'Utilities', 'Water and electricity', 940000, 'b2', '2026-08-28', 'Laundry')
+    `INSERT INTO expenses (id, category, description, amount, date, division) VALUES
+      ('e1', 'Payroll', 'August field team payroll', 4800000, '2026-08-30', 'Company overhead'),
+      ('e2', 'Supplies', 'Cleaning chemicals & PPE', 1120000, '2026-09-01', 'Cleaning Services'),
+      ('e3', 'Fuel', 'Field vehicles fuel', 680000, '2026-09-02', 'Company overhead'),
+      ('e4', 'Repairs', 'Washer drain pump replacement', 350000, '2026-08-29', 'Laundry'),
+      ('e5', 'Rent', 'September workspace rent', 1800000, '2026-09-01', 'Company overhead'),
+      ('e6', 'Utilities', 'Water and electricity', 940000, '2026-08-28', 'Laundry')
      ON CONFLICT (id) DO NOTHING`
   );
 
@@ -110,23 +103,23 @@ export async function seedData(client: ClientBase) {
   );
 
   await client.query(
-    `INSERT INTO equipment (id, name, serial_number, type, branch_id, value, book_value, condition, next_maintenance, usage) VALUES
-      ('a1', 'Industrial Washer WM-003', 'WM-2021-001', 'Washing machine', 'b2', 10000000, 8500000, 'Good', '2026-09-10', 384),
-      ('a2', 'Commercial Dryer DR-002', 'DR-2022-014', 'Dryer', 'b2', 7600000, 6200000, 'Good', '2026-09-18', 292),
-      ('a3', 'Toyota Hiace UBD 442K', 'UBD-442K', 'Vehicle', 'b1', 48000000, 35600000, 'Good', '2026-09-06', 12840),
-      ('a4', 'Karcher Pressure Washer', 'KPW-339-X', 'Pressure washer', 'b1', 4200000, 3400000, 'Maintenance due', '2026-09-03', 118),
-      ('a5', 'Industrial Ironing Press', 'IIP-880', 'Ironing machine', 'b2', 5300000, 4900000, 'Good', '2026-10-01', 164)
+    `INSERT INTO equipment (id, name, serial_number, type, value, book_value, condition, next_maintenance, usage) VALUES
+      ('a1', 'Industrial Washer WM-003', 'WM-2021-001', 'Washing machine', 10000000, 8500000, 'Good', '2026-09-10', 384),
+      ('a2', 'Commercial Dryer DR-002', 'DR-2022-014', 'Dryer', 7600000, 6200000, 'Good', '2026-09-18', 292),
+      ('a3', 'Toyota Hiace UBD 442K', 'UBD-442K', 'Vehicle', 48000000, 35600000, 'Good', '2026-09-06', 12840),
+      ('a4', 'Karcher Pressure Washer', 'KPW-339-X', 'Pressure washer', 4200000, 3400000, 'Maintenance due', '2026-09-03', 118),
+      ('a5', 'Industrial Ironing Press', 'IIP-880', 'Ironing machine', 5300000, 4900000, 'Good', '2026-10-01', 164)
      ON CONFLICT (id) DO NOTHING`
   );
 
   await client.query(
-    `INSERT INTO inventory_items (id, name, category, unit, quantity, minimum, cost, branch_id) VALUES
-      ('inv1', 'Laundry detergent', 'Laundry supplies', 'kg', 18, 25, 14500, 'b2'),
-      ('inv2', 'Fabric softener', 'Laundry supplies', 'litre', 42, 20, 12000, 'b2'),
-      ('inv3', 'Disinfectant', 'Cleaning supplies', 'litre', 64, 30, 8500, 'b1'),
-      ('inv4', 'Microfiber cloths', 'Cleaning supplies', 'pack', 11, 15, 22000, 'b1'),
-      ('inv5', 'Car shampoo', 'Detailing materials', 'litre', 36, 12, 18000, 'b1'),
-      ('inv6', 'Plumbing fittings', 'Repair materials', 'box', 8, 5, 95000, 'b2')
+    `INSERT INTO inventory_items (id, name, category, unit, quantity, minimum, cost) VALUES
+      ('inv1', 'Laundry detergent', 'Laundry supplies', 'kg', 18, 25, 14500),
+      ('inv2', 'Fabric softener', 'Laundry supplies', 'litre', 42, 20, 12000),
+      ('inv3', 'Disinfectant', 'Cleaning supplies', 'litre', 64, 30, 8500),
+      ('inv4', 'Microfiber cloths', 'Cleaning supplies', 'pack', 11, 15, 22000),
+      ('inv5', 'Car shampoo', 'Detailing materials', 'litre', 36, 12, 18000),
+      ('inv6', 'Plumbing fittings', 'Repair materials', 'box', 8, 5, 95000)
      ON CONFLICT (id) DO NOTHING`
   );
 }

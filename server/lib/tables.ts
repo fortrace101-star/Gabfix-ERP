@@ -18,4 +18,4 @@ export function insertSql(table: string, entries: [string, unknown][], id: strin
 export const placeholderId = (table: string) => `${table}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 /** Tables wiped before a workspace replace or reset (order is irrelevant to TRUNCATE). */
-export const TRUNCATE_TABLES = ['jobs', 'invoices', 'expenses', 'laundry_orders', 'equipment', 'inventory_items', 'customers', 'services', 'branches'];
+export const TRUNCATE_TABLES = ['jobs', 'invoices', 'expenses', 'laundry_orders', 'equipment', 'inventory_items', 'customers', 'services'];
