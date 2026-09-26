@@ -93,6 +93,7 @@ Goal: Establish the independent Vite+React 18 app structure for all four service
 | `@typescript-eslint/no-explicit-any` in 3 new apps' `vite.config.ts` | Replaced `let pwaPlugin: any = []` → `let pwaPlugin: Plugin[] = []` + `import { Plugin } from 'vite'` | No `any` types remain in any `vite.config.ts`; `Plugin` confirmed exported by Vite's TS definitions |
 | No explicit ports in `vite.config.ts` (all default to 5173) | Added `port` + `strictPort: true` to each app's `server` config | admin 5173, laundry 5174, portal 5175, store 5176 — all ports confirmed available via `netstat` |
 | `scripts/dev.mjs` only spawned server + admin | Added `laundry`, `portal`, `store` entries to `procs` array | Root `npm run dev` spawns all 5 processes concurrently |
+| Orphaned node.exe processes kept ports 5173–5176 + 4000 occupied after a previous dev run, so the next `npm run dev` failed (e.g. "Port 5174 is already in use") — on Windows `child.kill()` only kills the `npm.cmd` wrapper, not the vite/tsx processes beneath it | `scripts/dev.mjs` now kills the full process tree on shutdown via `taskkill /PID <pid> /T /F` (Windows) / `SIGTERM` (POSIX); verified: all 4 apps bind 5173–5176, and after shutdown `netstat` shows zero listeners |
 | Duplicated `export default export default` in admin's `vite.config.ts` | Fixed to single `export default defineConfig({` | Admin build verified |
 | `vite-plugin-pwa` not installed in app dirs | Optional via `try/catch` `await import('vite-plugin-pwa')` | Apps build and run without it; `npm install` in app dir enables PWA features; expected console warning: "not installed — PWA features disabled" |
 
@@ -195,6 +196,7 @@ Goal: Vendored theme tokens, `useTheme` hook, `StatusBadge` component, and PWA s
 | 2026-09-26 | Phase 0b: `.status` CSS classes + `[data-theme="dark"]` dark-mode overrides added to all 4 apps' CSS files (`tokens.css` / `index.css`); CSS variables updated for dark mode in all apps |
 | 2026-09-26 | Phase 0b: `.env` files created for all 4 apps setting `VITE_APP_ID` (admin/laundry/portal/store); `vite-env.d.ts` (with `vite/client` reference) created for 3 new apps to resolve `import.meta.env` type errors |
 | 2026-09-26 | Phase 0b verification: all 4 apps pass `tsc --noEmit` typecheck; 3 new apps pass ESLint; admin's modified files introduce no new lint errors; all 4 apps build with `vite build` (exit 0); progress doc updated with Phase 0b section, updated App Registry, and verification matrix
+| 2026-09-26 | Dev-env fix: `scripts/dev.mjs` shutdown now kills the whole child process tree (`taskkill /T /F` on Windows) instead of `child.kill()`, which orphaned vite/tsx processes that kept ports 5173–5176 + 4000 occupied and broke subsequent `npm run dev` runs ("Port 5174 is already in use"). Verified: clean startup on all ports, zero listeners after shutdown. Note: "vite-plugin-pwa not installed — PWA features disabled" warnings remain expected until the plugin is installed in each app dir |
 
 
 

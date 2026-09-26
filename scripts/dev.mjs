@@ -1,8 +1,9 @@
 // Runs the API server + all four Vite+React dev servers concurrently.
 // Usage: npm run dev  (or: node scripts/dev.mjs)
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const isWin = process.platform === 'win32';
 
 const procs = [
   { name: 'server', args: ['--prefix', 'server', 'run', 'dev'] },
@@ -34,10 +35,25 @@ const procs = [
 
 let exiting = false;
 
+// On Windows, child.kill() only kills the npm.cmd shell wrapper — the spawned
+// node processes (vite dev servers, tsx server) survive as orphans and keep
+// their ports (5173–5176, 4000) occupied, breaking the next `npm run dev`.
+// taskkill /T kills the entire process tree; on POSIX, kill the child first so
+// npm forwards SIGTERM to the run-script process it spawned.
+const killTree = (child) => {
+  if (isWin) {
+    if (child.pid != null) {
+      try { execSync(`taskkill /PID ${child.pid} /T /F`, { stdio: 'ignore' }); } catch { /* already gone */ }
+    }
+  } else {
+    child.kill('SIGTERM');
+  }
+};
+
 const shutdown = (code = 1) => {
   if (exiting) return;
   exiting = true;
-  for (const { child } of procs) child.kill();
+  for (const { child } of procs) killTree(child);
   process.exitCode = code;
 };
 
