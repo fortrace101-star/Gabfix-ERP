@@ -22,7 +22,7 @@ authRouter.post('/login', async (req, res) => {
     }
 
     const { rows } = await pool.query(
-      `SELECT id, name, role, pin_hash, active FROM employees
+      `SELECT id, name, role, app_scope, pin_hash, active FROM employees
        WHERE deleted_at IS NULL AND active
          AND (lower(name) = lower($1) OR (email <> '' AND lower(email) = lower($1)))
        LIMIT 1`,
@@ -34,7 +34,7 @@ authRouter.post('/login', async (req, res) => {
       return;
     }
 
-    const user: AuthUser = { id: employee.id, name: employee.name, role: employee.role };
+    const user: AuthUser = { id: employee.id, name: employee.name, role: employee.role, app_scope: employee.app_scope ?? [] };
     res.json({ ...signTokens(user), user });
   } catch (error) {
     fail(res, error, 'Login failed');
@@ -52,7 +52,7 @@ authRouter.post('/refresh', async (req, res) => {
     }
 
     const { rows } = await pool.query(
-      `SELECT id, name, role, active FROM employees WHERE id = $1 AND deleted_at IS NULL`,
+      `SELECT id, name, role, app_scope, active FROM employees WHERE id = $1 AND deleted_at IS NULL`,
       [candidate.id],
     );
     const employee = rows[0];
@@ -61,7 +61,7 @@ authRouter.post('/refresh', async (req, res) => {
       return;
     }
 
-    const user: AuthUser = { id: employee.id, name: employee.name, role: employee.role };
+    const user: AuthUser = { id: employee.id, name: employee.name, role: employee.role, app_scope: employee.app_scope ?? [] };
     res.json({ ...signTokens(user), user });
   } catch (error) {
     fail(res, error, 'Refresh failed');
@@ -72,7 +72,7 @@ authRouter.post('/refresh', async (req, res) => {
 authRouter.get('/me', requireAuth, async (req, res) => {
   try {
     const { rows } = await pool.query(
-      `SELECT id, name, role, phone, email FROM employees
+      `SELECT id, name, role, app_scope, phone, email FROM employees
        WHERE id = $1 AND deleted_at IS NULL AND active`,
       [req.user?.id],
     );

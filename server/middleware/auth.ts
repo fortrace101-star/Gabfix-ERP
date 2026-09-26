@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { randomBytes } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 
-export type AuthUser = { id: string; name: string; role: string };
+export type AuthUser = { id: string; name: string; role: string; app_scope: string[] };
 
 declare global {
   namespace Express {
@@ -27,7 +27,7 @@ const refreshTtl = process.env.REFRESH_TTL || '7d';
 export const authEnforced = () => process.env.AUTH_ENFORCE === 'true';
 
 export function signTokens(user: AuthUser) {
-  const base = { sub: user.id, name: user.name, role: user.role };
+  const base = { sub: user.id, name: user.name, role: user.role, app_scope: user.app_scope };
   // Env values are plain strings; the types want the narrower StringValue.
   const access = accessTtl as jwt.SignOptions['expiresIn'];
   const refresh = refreshTtl as jwt.SignOptions['expiresIn'];
@@ -37,12 +37,25 @@ export function signTokens(user: AuthUser) {
   };
 }
 
+function readScope(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
 /** Verify a token and check its type; returns null for anything invalid. */
 export function verifyToken(token: string, typ: 'access' | 'refresh'): AuthUser | null {
   try {
     const payload = jwt.verify(token, secret) as jwt.JwtPayload;
     if (payload.typ !== typ || typeof payload.sub !== 'string') return null;
-    return { id: payload.sub, name: String(payload.name ?? ''), role: String(payload.role ?? '') };
+    // Tokens minted before Phase 0c carry no app_scope; treat them as
+    // control-plane tokens so existing admin sessions keep working.
+    const app_scope = readScope(payload.app_scope);
+    return {
+      id: payload.sub,
+      name: String(payload.name ?? ''),
+      role: String(payload.role ?? ''),
+      app_scope: app_scope.length ? app_scope : ['admin'],
+    };
   } catch {
     return null;
   }
@@ -70,6 +83,26 @@ export function requireRole(...roles: string[]) {
     }
     if (!roles.includes(req.user.role)) {
       res.status(403).json({ error: 'Insufficient role' });
+      return;
+    }
+    next();
+  };
+}
+
+/**
+ * 401 without a user, 403 when the token carries none of the required app
+ * scopes (multi-app-plan §10.2). Staged like guard(): pass-through until
+ * AUTH_ENFORCE=true, so the current no-login dev posture keeps working.
+ */
+export function requireScope(...scopes: string[]) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!authEnforced()) return next();
+    if (!req.user) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+    if (!scopes.some((scope) => req.user!.app_scope.includes(scope))) {
+      res.status(403).json({ error: 'App scope not permitted' });
       return;
     }
     next();

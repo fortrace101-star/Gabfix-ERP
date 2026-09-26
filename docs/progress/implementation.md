@@ -6,7 +6,7 @@
 | Requirements | [`docs/requirements.md`](../requirements.md) |
 | Baseline commit | `100d0aa` (Pre-refactor baseline snapshot before enhancement work) |
 | Started | 2026-09-25 |
-| Status | Phase 0a complete · Phase 0b complete · Phase 0c pending |
+| Status | Phase 0a complete · Phase 0b complete · Phase 0c in progress (0c.1 done: identity scopes + sync tables + auth/CORS; 006 remove-branches and §0.9–0.12 remaining) |
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -20,7 +20,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | --- | --- | --- | --- |
 | Phase 0a | Multi-app scaffold | Rename `client/` → `gabfix-administrator`; scaffold 3 new Vite+React 18 apps; per-app configs; root dev scripts; ports 5173–5176 | ✅ done |
 | **Phase 0b** | **Theme, components & PWA shells** | **Vendored theme tokens; `useTheme` hook; `StatusBadge` component; PWA manifests + sw; `.env` with `VITE_APP_ID`** | **✅ done** |
-| Phase 0c | Backend multi-app wiring | `005_multiapp_identity` + `006_remove_branches` + `sync_tables` migrations; server identity/roles scoped to 4 apps; §0.9 dates, §0.10 client split, §0.11 SSE, §0.12 CI completion | ⏳ next |
+| Phase 0c | Backend multi-app wiring | `005_multiapp_identity` + `006_remove_branches` + `sync_tables` migrations; server identity/roles scoped to 4 apps; §0.9 dates, §0.10 client split, §0.11 SSE, §0.12 CI completion | 🔄 0c.1 done (005+sync tables, requireScope, CORS) · 006 + §0.9–0.12 remaining |
 | Phase 1 | Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | — |
 | Phase 2 | PDF & documents | jsPDF + AutoTable, 14 document types, print/download/attach | — |
 | Phase 3 | Notifications, feedback, real-time | WhatsApp/SMS, completion message, feedback form, SSE | — |
@@ -29,7 +29,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | Phase 6 | Real-time upgrade | Socket.IO chat, Inbox, presence, live map | — |
 | Phase 7 | Depth | Payment gateway + reconciliation, scheduled reports, dunning | — |
 
-> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c is next. Phases 0.1–0.8 (baseline, migrations, identity, auth, handler split, zod, numbering) are also complete from prior work; §0.9–§0.12 remain pending and will land in Phase 0c.
+> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c 🔄 (0c.1 done — see Phase 0c section; `006_remove_branches` + admin branch-strip and §0.9–§0.12 remain). Phases 0.1–0.8 (baseline, migrations, identity, auth, handler split, zod, numbering) are also complete from prior work.
 
 ---
 
@@ -156,12 +156,54 @@ Goal: Vendored theme tokens, `useTheme` hook, `StatusBadge` component, and PWA s
 
 ---
 
+## Phase 0c — Backend Multi-App Wiring (in progress)
+
+Reference: [`docs/plans/multi-app-plan.md`](../plans/multi-app-plan.md) §10 (Server Readjustments), §11 (Expense model lands in Phase 1), §9 (Delivery Order).
+Goal: one server, four apps — identity carries `app_scope`, routes are scope-guarded, CORS covers the four Vercel origins + dev ports 5173–5179, offline sync tables exist.
+
+### 0c.1 — Identity scopes, sync tables, requireScope, CORS ✅
+
+| Step | Work (per plan §10.1–10.4) | Status | Notes |
+| --- | --- | --- | --- |
+| 0c.1a | Migration `005_multiapp_identity.sql`: `employees.app_scope TEXT[]` + CHECK (subset of admin/laundry/portal/store), role CHECK widened with `storekeeper`, scope backfill per role, owner = all 4 scopes, partial unique index enforces a single live owner | [x] | Constraint discovered by name from `pg_constraint` (003 created it inline); fresh and existing DBs both converge on the same scope backfill |
+| 0c.1b | Migration `007_sync_outbox.sql` (plan's "011" slot, renumbered to the next free file in this repo): `sync_outbox` (idempotency_key UNIQUE, app_scope CHECK, status pending/applied/rejected) + `feedback_requests` (token UNIQUE, rating 1–5, channel, FK to customers/laundry_orders/jobs) | [x] | Dexie outbox on the laundry PWA references rows by idempotency_key; server rows stay permanent |
+| 0c.1c | Auth: `AuthUser.app_scope: string[]`; `signTokens` puts `app_scope` in both tokens; `verifyToken` falls back to `['admin']` for pre-0c tokens (existing admin sessions keep working); new `requireScope(...scopes)` guard | [x] | `requireScope` is staged like `guard()`: pass-through until `AUTH_ENFORCE=true`, so the no-login dev posture is unchanged |
+| 0c.1d | Auth routes read `app_scope` from the DB on login/refresh/me (fresh scope, no stale claim reuse) | [x] | `app_scope ?? []` tolerated for rows predating the column |
+| 0c.1e | CORS allowlist (plan §10.3): 4 Vercel origins + localhost/127.0.0.1 × 5173–5176 (+ 5177–5179 buffer); unknown origins rejected with "Not allowed by CORS"; `CORS_ALLOW_ALL=true` escape hatch documented in `.env.example` | [x] | Dual-stack dev matters: Vite binds IPv6 `::1`, so 127.0.0.1 forms are listed separately |
+| 0c.1f | Scoped mounts in `index.ts` (plan §10.4): `/api/data` + `/api/customers` all scopes; `/api/jobs` admin/portal/laundry; `/api/equipment` admin/laundry; `/api/expenses` + `/api/services` admin/laundry/store/portal; `/api/inventory` admin/laundry/store; import/reset stay owner-only | [x] | `/api/store`, `/api/laundry`, `/api/sync`, `/api/telemetry`, `/api/events` arrive with their phases (1–4) — mounts are added when the routers exist |
+
+### 0c.1 Verification matrix
+
+| Check | Result |
+| --- | --- |
+| `npm run db:migrate` applies 005 + 007 | ✅ applied cleanly on the existing dev DB |
+| DB probe (8 checks: owner scopes, role CHECK, scope CHECK, storekeeper accepted, new tables, idempotency uniqueness) | ✅ 8/8 |
+| API probe, staged mode (5 checks: health, /api/data open, 5174 + vercel origins echoed, unknown origin rejected) | ✅ 5/5 |
+| API probe, enforced mode (8 checks: 401 no token, owner login, JWT carries 4 scopes, scoped access, 422-not-403 on allowed mount, 403 "App scope not permitted" on denied mount) | ✅ 8/8 |
+| Root `npm run typecheck` (4 apps + server) | ✅ exit 0 |
+| Temp probe harness removed after verification | ✅ `server/tmp-probe-0c*.ts`, `scripts/tmp-probe-0c.sh` deleted |
+
+Probe methodology note: routers expose POST/PATCH only (reads via `/api/data`), so scope-allow assertions expect the request to pass the mount and reach validation (422 on empty body), not an HTTP 200 list.
+
+### 0c.2 — Remove branches + §0.9–§0.12 (next)
+
+| Step | Work | Status |
+| --- | --- | --- |
+| 0c.2a | Migration `006_remove_branches.sql`: drop `branch_id` from jobs/expenses/equipment/inventory_items/employees, drop `branches`, drop branch filters from validation + `db.ts` + `TRUNCATE_TABLES`, strip branch UI from admin (`App.tsx` switcher, table column, report, forms, laundry/equipment/inventory filters, seed data) | [ ] |
+| 0c.2b | §0.9 Africa/Kampala date handling (`server/lib/dates.ts`, admin `lib/dates.ts`) | [ ] |
+| 0c.2c | §0.10 admin client split (app/features/components/lib) | [ ] |
+| 0c.2d | §0.11 SSE event bus (`routes/events.ts`, `services/realtime.ts`) | [ ] |
+| 0c.2e | §0.12 tests + CI (`server/test/*`, `.github/workflows/ci.yml`) | [ ] |
+
+---
+
 ## Later phases (summary — see plan §18.1)
 
 | Phase | Goal | Estimate | Status |
 | --- | --- | --- | --- |
 | 0a. Multi-app scaffold | 4 apps (admin + 3 new) + root scripts + per-app configs + ports | 2–3 d | [x] |
 | 0b. Theme, components & PWA shells | Vendored tokens + useTheme + StatusBadge + PWA manifests | 1–2 d | [x] |
+| 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; §0.9–0.12 | 3–5 d | [~] 0c.1 done |
 | 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [ ] |
 | 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [ ] |
 | 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [ ] |
@@ -197,6 +239,8 @@ Goal: Vendored theme tokens, `useTheme` hook, `StatusBadge` component, and PWA s
 | 2026-09-26 | Phase 0b: `.env` files created for all 4 apps setting `VITE_APP_ID` (admin/laundry/portal/store); `vite-env.d.ts` (with `vite/client` reference) created for 3 new apps to resolve `import.meta.env` type errors |
 | 2026-09-26 | Phase 0b verification: all 4 apps pass `tsc --noEmit` typecheck; 3 new apps pass ESLint; admin's modified files introduce no new lint errors; all 4 apps build with `vite build` (exit 0); progress doc updated with Phase 0b section, updated App Registry, and verification matrix
 | 2026-09-26 | Dev-env fix: `scripts/dev.mjs` shutdown now kills the whole child process tree (`taskkill /T /F` on Windows) instead of `child.kill()`, which orphaned vite/tsx processes that kept ports 5173–5176 + 4000 occupied and broke subsequent `npm run dev` runs ("Port 5174 is already in use"). Verified: clean startup on all ports, zero listeners after shutdown. Note: "vite-plugin-pwa not installed — PWA features disabled" warnings remain expected until the plugin is installed in each app dir |
+| 2026-09-26 | PWA enabled for real in all 4 apps: pinned `vite-plugin-pwa@^0.20.7` did not exist on npm (0.20.x ends at 0.20.5), so every `npm install` had failed silently behind the try/catch. Repinned to `^0.21.2` (peer-supports the apps' Vite 5.4), installed per-app, and removed the invalid `BackgroundSync` runtimeCaching entry from portal's vite config (workbox-build v7 rejects it and aborts the build; offline queueing belongs to the Dexie outbox per plan §6 and `/api/` NetworkFirst already covers `/api/beacon`). All 4 apps build green with `PWA v0.21.2` + `dist/sw.js` + manifest; the "PWA features disabled" warning is gone in dev |
+| 2026-09-26 | Phase 0c.1 done: `005_multiapp_identity.sql` (app_scope + storekeeper + owner=all-4 scopes + single-owner index), `007_sync_outbox.sql` (sync_outbox + feedback_requests), `requireScope` guard + `app_scope` in JWTs (pre-0c tokens fall back to admin scope), CORS allowlist (4 Vercel origins + 5173–5179, `CORS_ALLOW_ALL` escape hatch), scoped route mounts per plan §10.4. Verified: DB probe 8/8, API probe staged 5/5 + enforced 8/8, root typecheck clean; temp probes deleted |
 
 
 

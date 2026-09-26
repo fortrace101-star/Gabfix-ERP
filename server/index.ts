@@ -11,10 +11,33 @@ import { inventoryRouter } from './routes/inventory';
 import { jobsRouter } from './routes/jobs';
 import { servicesRouter } from './routes/services';
 import { workspaceRouter } from './routes/workspace';
-import { guard } from './middleware/auth';
+import { guard, requireScope } from './middleware/auth';
+
+// Multi-app CORS (multi-app-plan §10.3): the four Vercel apps plus local dev
+// ports 5173–5179. Vite serves on IPv6 localhost in dev, hence the ::1 forms.
+const ALLOWED_ORIGINS = [
+  'https://gabfix-administrator.vercel.app',
+  'https://gabfix-laundry-front-office.vercel.app',
+  'https://gabfix-inhouse-erp.vercel.app',
+  'https://gabfix-store.vercel.app',
+  'http://localhost:5173', 'http://127.0.0.1:5173',
+  'http://localhost:5174', 'http://127.0.0.1:5174',
+  'http://localhost:5175', 'http://127.0.0.1:5175',
+  'http://localhost:5176', 'http://127.0.0.1:5176',
+  'http://localhost:5177', 'http://localhost:5178', 'http://localhost:5179',
+];
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin(origin, callback) {
+    // No Origin (curl, same-origin) or an allowlisted origin passes.
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    // Dev override for preview servers etc., documented in .env.example.
+    if (process.env.CORS_ALLOW_ALL === 'true') return callback(null, true);
+    callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+}));
 app.use(express.json());
 
 // Health stays unauthenticated (also exempted inside guard()).
@@ -30,14 +53,19 @@ app.use('/api/auth', authRouter);
 // once the login screen ships. Owner-only routes add guard('owner') on top.
 app.use('/api', guard());
 
-app.use('/api/data', workspaceRouter);
-app.use('/api/customers', customersRouter);
-app.use('/api/jobs', jobsRouter);
-app.use('/api/equipment', equipmentRouter);
-app.use('/api/expenses', expensesRouter);
-app.use('/api/services', servicesRouter);
-app.use('/api/inventory', inventoryRouter);
-app.use('/api', adminRouter); // POST /api/import, POST /api/reset
+// Scoped mounts (multi-app-plan §10.4): each mount carries the app_scope set
+// that may use it. Scope checks arm when AUTH_ENFORCE=true — mirroring guard(),
+// they stay pass-through in the default dev posture.
+const scoped = requireScope;
+
+app.use('/api/data', scoped('admin', 'laundry', 'portal', 'store'), workspaceRouter);
+app.use('/api/customers', scoped('admin', 'laundry', 'portal', 'store'), customersRouter);
+app.use('/api/jobs', scoped('admin', 'portal', 'laundry'), jobsRouter);
+app.use('/api/equipment', scoped('admin', 'laundry'), equipmentRouter);
+app.use('/api/expenses', scoped('admin', 'laundry', 'store', 'portal'), expensesRouter);
+app.use('/api/services', scoped('admin', 'laundry', 'store', 'portal'), servicesRouter);
+app.use('/api/inventory', scoped('admin', 'laundry', 'store'), inventoryRouter);
+app.use('/api', adminRouter); // POST /api/import, POST /api/reset (owner-only inside)
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
