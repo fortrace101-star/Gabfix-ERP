@@ -5,6 +5,22 @@ import { fail } from '../lib/http';
 import { parseBody } from '../validation/common';
 import type { Resource, SequenceKey } from '../validation/resources';
 import { nextNumber } from '../services/numbering';
+import { publish } from '../services/realtime';
+
+/** SSE event type for a resource's create/update, derived from its table name. */
+function eventTypeFor(resource: Resource, action: 'created' | 'updated'): string {
+  const singular: Record<string, string> = {
+    jobs: 'job',
+    customers: 'customer',
+    expenses: 'expense',
+    equipment: 'equipment',
+    inventory_items: 'inventory',
+  };
+  const noun = singular[resource.table];
+  // Tables without a live event type (invoices, laundry_orders) simply do not
+  // broadcast yet — they have no write routes in this phase.
+  return noun ? `${noun}-${action}` : '';
+}
 
 /** Everything a create handler needs beyond the resource schema. */
 export type CreateOptions = {
@@ -58,6 +74,10 @@ export function createHandler(resource: Resource, options: CreateOptions) {
       const body: { id: string; number?: string } = { id };
       if (data.number) body.number = data.number as string;
       res.status(201).json(body);
+
+      // Broadcast after the response so the write path is never delayed.
+      const type = eventTypeFor(resource, 'created');
+      if (type) publish({ type: type as never, by: req.user?.name });
     } catch (error) {
       fail(res, error, `Invalid ${resource.label}`);
     }
@@ -74,6 +94,9 @@ export function updateHandler(resource: Resource, options: { notFound: string; l
       const updated = await updateRecord(resource, String(req.params.id), parsed);
       if (!updated) return res.status(404).json({ error: options.notFound });
       res.json({ ok: true });
+
+      const type = eventTypeFor(resource, 'updated');
+      if (type) publish({ type: type as never, by: req.user?.name });
     } catch (error) {
       fail(res, error, `Invalid ${options.label}`);
     }

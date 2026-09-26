@@ -4,6 +4,7 @@ import { seedData } from '../seed-data';
 import { replaceAll, truncateWorkspace } from '../repositories/records';
 import { fail } from '../lib/http';
 import { guard } from '../middleware/auth';
+import { publish } from '../services/realtime';
 
 /** Owner-only workspace maintenance: both endpoints wipe every managed table. */
 export const adminRouter = Router();
@@ -18,6 +19,7 @@ adminRouter.post('/import', guard('owner'), async (req, res) => {
     await replaceAll(client, payload);
     await client.query('COMMIT');
     res.json({ ok: true });
+    publish({ type: 'workspace-reset' });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('POST /api/import failed:', error);
@@ -36,6 +38,7 @@ adminRouter.post('/reset', guard('owner'), async (_req, res) => {
     await seedData(client);
     await client.query('COMMIT');
     res.json({ ok: true });
+    publish({ type: 'workspace-reset' });
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('POST /api/reset failed:', error);

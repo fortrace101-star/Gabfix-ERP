@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { createHandler, updateHandler } from './handlers';
 import { equipmentResource } from '../validation/resources';
+import { addDays, kampalaToday } from '../lib/dates';
 
 /** New assets assume a 90-day maintenance window. */
 const DEFAULT_MAINTENANCE_DAYS = 90;
@@ -10,7 +11,7 @@ const withDefaults = (data: Record<string, unknown>) => ({
   ...data,
   bookValue: data.bookValue ?? data.value,
   condition: data.condition ?? 'Good',
-  nextMaintenance: data.nextMaintenance ?? new Date(Date.now() + DEFAULT_MAINTENANCE_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+  nextMaintenance: data.nextMaintenance ?? addDays(kampalaToday(), DEFAULT_MAINTENANCE_DAYS),
   usage: data.usage ?? 0,
 });
 

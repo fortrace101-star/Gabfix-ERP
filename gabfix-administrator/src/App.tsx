@@ -7,47 +7,15 @@ import * as api from './api';
 import type { AppData, Customer, Equipment, InventoryItem, Job, JobStatus, LaundryOrder, Modal, View } from './types';
 import StatusBadge from '@/components/StatusBadge';
 import { useTheme } from '@/hooks/useTheme';
+import { periodStart as computePeriodStart, todayISO } from '@/lib/dates';
 
 /** Currency code used by every money() call. The Settings profile updates this at runtime. */
 let activeCurrency = 'UGX';
 const setCurrency = (code: string) => { activeCurrency = code || 'UGX'; };
 const money = (value: number) => new Intl.NumberFormat('en-UG', { style: 'currency', currency: activeCurrency, currencyDisplay: 'code', maximumFractionDigits: 0 }).format(value);
-const today = new Date().toISOString().slice(0, 10);
+const today = todayISO();
 
-const getStartDate = (period: string): string => {
-  const now = new Date();
-  const start = new Date(now);
-  switch (period) {
-    case 'This day':
-      start.setHours(0, 0, 0, 0);
-      break;
-    case 'This week':
-      start.setDate(now.getDate() - now.getDay());
-      break;
-    case 'This quarter':
-      start.setMonth(Math.floor(now.getMonth() / 3) * 3, 1);
-      break;
-    case 'This year':
-      start.setMonth(0, 1);
-      break;
-    case 'This month':
-    default:
-      start.setDate(1);
-      break;
-  }
-  return start.toISOString().slice(0, 10);
-};
-
-/** The equivalent date window immediately before the selected period, used for real trend figures. */
-const previousPeriodWindow = (period: string) => {
-  const iso = (date: Date) => date.toISOString().slice(0, 10);
-  const start = new Date(getStartDate(period));
-  const now = new Date();
-  const days = Math.max(1, Math.round((now.getTime() - start.getTime()) / 86400000));
-  const previousEnd = new Date(start.getTime() - 86400000);
-  const previousStart = new Date(previousEnd.getTime() - days * 86400000);
-  return { start: iso(previousStart), end: iso(previousEnd) };
-};
+const getStartDate = (period: string): string => computePeriodStart(period);
 
 const inWindow = (date: string, window: { start: string; end: string }) => date >= window.start && date <= window.end;
 
@@ -130,6 +98,24 @@ function App() {
   useEffect(() => { let cancelled = false; (async () => { try { const remote = await api.fetchData(); if (!cancelled) setData(remote); } catch { if (!cancelled) setLoadError('Could not reach the database. Is the API server running?'); } finally { if (!cancelled) setLoading(false); } })(); return () => { cancelled = true; }; }, []);
   useEffect(() => { if (toast) { const timer = window.setTimeout(() => setToast(''), 2600); return () => window.clearTimeout(timer); } }, [toast]);
   useEffect(() => { setCurrency(profile.currency); }, [profile.currency]);
+  // Live updates (Phase 0.11): any write from any Gabfix app triggers a refresh
+  // here, so a job created by a second browser appears without a manual reload.
+  // The periodic fallback covers an SSE gap (proxy timeout, sleeping tab).
+  useEffect(() => {
+    let reconnect: number | undefined;
+    const connect = () => {
+      const source = new EventSource('/api/events');
+      const refreshOn = () => void refresh();
+      source.onmessage = refreshOn;
+      for (const type of ['job-created', 'job-updated', 'customer-created', 'expense-created', 'equipment-created', 'equipment-updated', 'inventory-created', 'inventory-updated', 'workspace-reset']) source.addEventListener(type, refreshOn);
+      source.onerror = () => { source.close(); window.clearTimeout(reconnect); reconnect = window.setTimeout(connect, 4000); };
+    };
+    connect();
+    const fallback = window.setInterval(() => void refresh(), 30000);
+    return () => { window.clearInterval(fallback); window.clearTimeout(reconnect); };
+    // refresh is stable in behavior (setData + fetchData); re-subscribing per render would churn the SSE socket.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -174,7 +160,7 @@ function App() {
   /** Everything that genuinely needs attention, derived from live records. */
   const alerts = useMemo(() => {
     const overdue = data.invoices.filter(invoice => invoice.status === 'Overdue');
-    const dueMaintenance = data.equipment.filter(item => new Date(item.nextMaintenance) <= new Date());
+    const dueMaintenance = data.equipment.filter(item => isDue(item.nextMaintenance));
     const lowStock = data.inventory.filter(item => item.quantity <= item.minimum);
     const readyLaundry = data.laundry.filter(order => order.status === 'Ready');
     const list: { title: string; detail: string; tone: string; icon: ReactNode; view: View }[] = [];
@@ -221,7 +207,7 @@ function App() {
     <aside className={`sidebar ${mobileOpen ? 'open' : ''}`}>
       <div className="brand"><div className="brand-mark"><img src={profile.logo || gabfixLogo} alt={profile.companyName} /></div><div><strong>{profile.companyName.split(' ')[0]}</strong><span>{profile.tagline}</span></div><button className="mobile-close" onClick={() => setMobileOpen(false)} aria-label="Close navigation"><X size={18} /></button></div>
       
-      <nav>{navGroups.map(group => <div className="nav-group" key={group.label}><span className="nav-label">{group.label}</span>{group.items.map(item => { const Icon = item.icon; const overdueInvoices = item.id === 'finance' ? data.invoices.filter(inv => inv.status === 'Overdue').length : 0; const maintenanceCount = item.id === 'equipment' ? data.equipment.filter(e => new Date(e.nextMaintenance) <= new Date()).length : 0; const badgeCount = overdueInvoices || maintenanceCount; return <button key={item.id} className={`nav-item ${view === item.id ? 'active' : ''}`} onClick={() => { setView(item.id as View); setMobileOpen(false); }}><Icon size={17} /><span>{item.label}</span>{badgeCount > 0 && <span className="nav-badge">{badgeCount}</span>}</button>; })}</div>)}</nav>
+      <nav>{navGroups.map(group => <div className="nav-group" key={group.label}><span className="nav-label">{group.label}</span>{group.items.map(item => { const Icon = item.icon; const overdueInvoices = item.id === 'finance' ? data.invoices.filter(inv => inv.status === 'Overdue').length : 0; const maintenanceCount = item.id === 'equipment' ? data.equipment.filter(e => isDue(e.nextMaintenance)).length : 0; const badgeCount = overdueInvoices || maintenanceCount; return <button key={item.id} className={`nav-item ${view === item.id ? 'active' : ''}`} onClick={() => { setView(item.id as View); setMobileOpen(false); }}><Icon size={17} /><span>{item.label}</span>{badgeCount > 0 && <span className="nav-badge">{badgeCount}</span>}</button>; })}</div>)}</nav>
       <div className="sidebar-bottom"><div className="support-card"><Sparkles size={18} /><div><strong>Owner workspace</strong><span>Everything is up to date</span></div></div><button className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}><Settings size={17} /><span>Settings</span></button><div className="user-chip"><div className="avatar">GN</div><div><strong>Gabriel N.</strong><span>Owner account</span></div><ChevronDown size={14} /></div></div>
     </aside>
     {mobileOpen && <button className="mobile-backdrop" onClick={() => setMobileOpen(false)} aria-label="Close navigation" />}
@@ -258,7 +244,7 @@ function Dashboard({ data, period, setPeriod, revenue, expenses, receivables, se
   const repeatClients = data.customers.filter(customer => data.jobs.filter(job => job.customerId === customer.id).length + data.laundry.filter(order => order.customerId === customer.id).length > 1).length;
   const alertList = [
     ...(overdueInvoices ? [{ icon: <Clock3 />, title: `${overdueInvoices} invoice${overdueInvoices > 1 ? 's' : ''} overdue`, detail: `${money(data.invoices.filter(invoice => invoice.status === 'Overdue').reduce((sum, invoice) => sum + invoice.total - invoice.paid, 0))} still to collect`, tone: 'rose', view: 'finance' as View }] : []),
-    ...(data.equipment.filter(item => new Date(item.nextMaintenance) <= new Date()).length ? [{ icon: <Wrench />, title: `${data.equipment.filter(item => new Date(item.nextMaintenance) <= new Date()).length} machine(s) due for service`, detail: data.equipment.filter(item => new Date(item.nextMaintenance) <= new Date()).map(item => item.name).join(', '), tone: 'amber', view: 'equipment' as View }] : []),
+    ...(data.equipment.filter(item => isDue(item.nextMaintenance)).length ? [{ icon: <Wrench />, title: `${data.equipment.filter(item => isDue(item.nextMaintenance)).length} machine(s) due for service`, detail: data.equipment.filter(item => isDue(item.nextMaintenance)).map(item => item.name).join(', '), tone: 'amber', view: 'equipment' as View }] : []),
     ...(data.inventory.filter(item => item.quantity <= item.minimum).length ? [{ icon: <Package />, title: `${data.inventory.filter(item => item.quantity <= item.minimum).length} item${data.inventory.filter(item => item.quantity <= item.minimum).length > 1 ? 's' : ''} running low`, detail: data.inventory.filter(item => item.quantity <= item.minimum).map(item => item.name).join(', '), tone: 'blue', view: 'inventory' as View }] : []),
     ...(data.laundry.filter(order => order.status === 'Ready').length ? [{ icon: <Droplets />, title: `${data.laundry.filter(order => order.status === 'Ready').length} laundry order${data.laundry.filter(order => order.status === 'Ready').length > 1 ? 's' : ''} ready`, detail: data.laundry.filter(order => order.status === 'Ready').map(order => order.number).join(', '), tone: 'green', view: 'laundry' as View }] : []),
   ];
@@ -399,6 +385,9 @@ function getPaymentStatus(job: Job, data: AppData) {
 function JobTable({ jobs, data, setModal, setModalData }: { jobs: Job[]; data: AppData; compact?: boolean; setModal?: (modal: Modal) => void; setModalData?: (data: any) => void }) { return <div className="table-wrap"><table><thead><tr><th>Job</th><th>Status</th><th>Customer</th><th>Service</th><th>Revenue</th><th>Payment Status</th>{setModal && <th>Action</th>}</tr></thead><tbody>{jobs.length ? jobs.map(job => { const customer = data.customers.find(item => item.id === job.customerId); const service = data.services.find(item => item.id === job.serviceId); const paymentStatus = getPaymentStatus(job, data); return <tr key={job.id}><td><strong className="linkish">{job.number}</strong><small>{job.date}</small></td><td><StatusBadge value={job.status} /></td><td><strong>{customer?.company || customer?.name}</strong><small>{customer?.type}</small></td><td>{service?.name}<small>{service?.division}</small></td><td><strong>{money(job.revenue)}</strong><small className="profit-text">{Math.round((job.revenue - job.cost) / job.revenue * 100)}% margin</small></td><td><StatusBadge value={paymentStatus} /></td>{setModal && <td><button className="more-button" onClick={() => { setModal?.('job-status'); setModalData?.(job); }}>Update</button></td>}</tr>; }) : <tr><td colSpan={7}><EmptyState title="No jobs match" /></td></tr>}</tbody></table></div>; }
 function MiniStat({ label, value, tone }: { label: string; value: string; tone: string }) { return <div className={`mini-stat ${tone}`}><span>{label}</span><strong>{value}</strong></div>; }
 function SelectFilter({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) { return <label className="filter-select"><Filter size={15} /><select value={value} onChange={event => onChange(event.target.value)} aria-label={label}>{options.map(option => <option key={option} value={option}>{option}</option>)}</select><ChevronDown size={14} /></label>; }
+/** Day-boundary maintenance check (Phase 0.9): due when scheduled day <= today. */
+const isDue = (nextMaintenance: string | null | undefined) => typeof nextMaintenance === 'string' && nextMaintenance.length > 0 && nextMaintenance <= today;
+
 function plain(value: number) { return new Intl.NumberFormat('en-UG').format(Math.round(value)); }
 function toCsv(rows: (string | number)[][]) { return rows.map(row => row.map(cell => { const value = String(cell ?? ''); return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value; }).join(',')).join('\r\n'); }
 function downloadCsv(filename: string, rows: (string | number)[][]) { const url = URL.createObjectURL(new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8;' })); const link = document.createElement('a'); link.href = url; link.download = `${filename}.csv`; link.click(); URL.revokeObjectURL(url); }
@@ -495,7 +484,7 @@ function LaundryView({ data, setModal, setModalData, setView, query }: { data: A
 
   return <><PageHeader eyebrow="Laundry division" title="Laundry operations" description="From drop-off to collection, keep every order and machine moving." action={<Button icon={<Plus size={17} />} onClick={() => setModal('job')}>New laundry order</Button>} /><div className="laundry-hero"><div className="laundry-copy"><span className="eyebrow">{monthLabel} performance</span><h2>Clean work. Clear numbers.</h2><p>Your laundry division has processed <strong>{ordersThisMonth} order{ordersThisMonth === 1 ? '' : 's'}</strong> in {monthLabel} and collected <strong>{collectedRate}%</strong> of the {money(revenue)} billed.</p><div className="laundry-actions"><Button onClick={() => setModal('job')} icon={<Plus size={16} />}>New order</Button><Button variant="secondary" onClick={() => setView('equipment')}>Machine usage</Button></div></div><div className="laundry-orbit"><Droplets size={42} /><span>{inProgressRate}%</span><small>orders in progress</small></div></div><div className="stat-row"><MiniStat label={`Orders in ${monthLabel}`} value={String(ordersThisMonth)} tone="blue" /><MiniStat label="Laundry revenue" value={money(revenue)} tone="green" /><MiniStat label="Ready for collection" value={String(readyCount)} tone="amber" /><MiniStat label="Unpaid balances" value={money(outstandingBalance)} tone="rose" /></div><section className="panel table-panel"><div className="table-toolbar"><div className="tabs"><button className={statusFilter === 'All' ? 'selected' : ''} onClick={() => setStatusFilter('All')}>All orders <b>{getCount('All')}</b></button><button className={statusFilter === 'Washing' ? 'selected' : ''} onClick={() => setStatusFilter('Washing')}>Washing <b>{getCount('Washing')}</b></button><button className={statusFilter === 'Drying' ? 'selected' : ''} onClick={() => setStatusFilter('Drying')}>Drying <b>{getCount('Drying')}</b></button><button className={statusFilter === 'Ready' ? 'selected' : ''} onClick={() => setStatusFilter('Ready')}>Ready <b>{getCount('Ready')}</b></button><button className={statusFilter === 'Collected' ? 'selected' : ''} onClick={() => setStatusFilter('Collected')}>Collected <b>{getCount('Collected')}</b></button></div><div className="filter-group"><select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)} className="payment-filter"><option value="All">All Payment Statuses</option><option value="Paid">Paid</option><option value="Unpaid">Unpaid</option><option value="Partial">Partial</option></select></div></div><LaundryTable orders={filtered} data={data} /></section></>; }
 
-function EquipmentView({ data, setModal, setModalData }: { data: AppData; setModal: (modal: Modal) => void; setModalData: (data: any) => void }) { const assets = data.equipment; const total = assets.reduce((sum, item) => sum + item.bookValue, 0); const maintenanceDue = assets.filter(item => new Date(item.nextMaintenance) <= new Date()).length; const accumulated = Math.max(0, assets.reduce((sum, item) => sum + item.value, 0) - total); return <><PageHeader eyebrow="Assets" title="Equipment & machines" description="Know what you own, what it costs, and what needs attention." action={<Button icon={<Plus size={17} />} onClick={() => setModal('equipment')}>Add equipment</Button>} /><div className="stat-row"><MiniStat label="Book value" value={money(total)} tone="blue" /><MiniStat label="Assets in service" value={`${assets.length - maintenanceDue}/${assets.length}`} tone="green" /><MiniStat label="Maintenance due" value={String(maintenanceDue)} tone="amber" /><MiniStat label="Accumulated depreciation" value={money(accumulated)} tone="rose" /></div><div className="asset-grid">{assets.map(item => <article className="asset-card" key={item.id}><div className="asset-top"><span className="asset-visual"><Wrench size={22} /></span><button className="more-button" onClick={() => { setModalData(item); setModal('equipment-update'); }}>Update</button></div><span className="eyebrow">{item.type}</span><h3>{item.name}</h3><small className="serial-number">SN: {item.serialNumber}</small><div className="asset-meta"><StatusBadge value={item.condition} /></div><div className="asset-value"><div><small>Current book value</small><strong>{money(item.bookValue)}</strong></div><div><small>Usage</small><strong>{item.usage.toLocaleString()} hrs</strong></div></div><div className="asset-footer"><span><CalendarDays size={13} /> Service due {item.nextMaintenance}</span><ArrowUpRight size={15} /></div></article>)}</div></>; }
+function EquipmentView({ data, setModal, setModalData }: { data: AppData; setModal: (modal: Modal) => void; setModalData: (data: any) => void }) { const assets = data.equipment; const total = assets.reduce((sum, item) => sum + item.bookValue, 0); const maintenanceDue = assets.filter(item => isDue(item.nextMaintenance)).length; const accumulated = Math.max(0, assets.reduce((sum, item) => sum + item.value, 0) - total); return <><PageHeader eyebrow="Assets" title="Equipment & machines" description="Know what you own, what it costs, and what needs attention." action={<Button icon={<Plus size={17} />} onClick={() => setModal('equipment')}>Add equipment</Button>} /><div className="stat-row"><MiniStat label="Book value" value={money(total)} tone="blue" /><MiniStat label="Assets in service" value={`${assets.length - maintenanceDue}/${assets.length}`} tone="green" /><MiniStat label="Maintenance due" value={String(maintenanceDue)} tone="amber" /><MiniStat label="Accumulated depreciation" value={money(accumulated)} tone="rose" /></div><div className="asset-grid">{assets.map(item => <article className="asset-card" key={item.id}><div className="asset-top"><span className="asset-visual"><Wrench size={22} /></span><button className="more-button" onClick={() => { setModalData(item); setModal('equipment-update'); }}>Update</button></div><span className="eyebrow">{item.type}</span><h3>{item.name}</h3><small className="serial-number">SN: {item.serialNumber}</small><div className="asset-meta"><StatusBadge value={item.condition} /></div><div className="asset-value"><div><small>Current book value</small><strong>{money(item.bookValue)}</strong></div><div><small>Usage</small><strong>{item.usage.toLocaleString()} hrs</strong></div></div><div className="asset-footer"><span><CalendarDays size={13} /> Service due {item.nextMaintenance}</span><ArrowUpRight size={15} /></div></article>)}</div></>; }
 
 function InventoryView({ data, setModal, setModalData, query }: { data: AppData; setModal: (modal: Modal) => void; setModalData: (data: any) => void; query: string }) { const [itemQuery, setItemQuery] = useState(''); const [category, setCategory] = useState('All categories'); const term = (itemQuery.trim() || query).trim(); const items = data.inventory.filter(item => (category === 'All categories' || item.category === category) && `${item.name} ${item.category} ${item.unit}`.toLowerCase().includes(term.toLowerCase())); const value = data.inventory.reduce((sum, item) => sum + item.quantity * item.cost, 0); return <><PageHeader eyebrow="Inventory" title="Stock & supplies" description="Stay ahead of the materials your teams use every day." action={<Button icon={<Plus size={17} />} onClick={() => setModal('inventory')}>Add stock</Button>}><SelectFilter label="Category" value={category} options={['All categories', ...Array.from(new Set(data.inventory.map(item => item.category))).sort()]} onChange={setCategory} /></PageHeader><div className="inventory-banner"><div className="inventory-banner-icon"><Package size={22} /></div><div><strong>{money(value)}</strong><span>Current inventory value</span></div><div className="inventory-alert"><AlertTriangle size={16} /><span><strong>{data.inventory.filter(item => item.quantity <= item.minimum).length} items</strong> are below minimum stock</span></div><Button variant="secondary" onClick={() => setModal('reorder')}>Stock movement</Button></div><section className="panel table-panel"><div className="table-toolbar"><div><h2 className="table-title">Inventory items</h2><span className="table-caption">Quantities update when materials are consumed on jobs</span></div><div className="inline-search"><Search size={16} /><input placeholder="Search stock" value={itemQuery} onChange={event => setItemQuery(event.target.value)} aria-label="Search stock items" /></div></div><div className="table-wrap"><table><thead><tr><th>Item</th><th>Category</th><th>Quantity</th><th>Cost / unit</th><th>Stock health</th><th>Action</th></tr></thead><tbody>{items.map(item => { const low = item.quantity <= item.minimum; return <tr key={item.id}><td><div className="person-cell"><span className="table-product"><Package size={16} /></span><span><strong>{item.name}</strong><small>{item.id.toUpperCase()} · {item.unit}</small></span></div></td><td>{item.category}</td><td><strong>{item.quantity} {item.unit}</strong><small>Minimum {item.minimum}</small></td><td>{money(item.cost)}</td><td><span className={`stock-health ${low ? 'low' : 'healthy'}`}><i />{low ? 'Reorder soon' : 'Healthy'}</span></td><td><button className="more-button" onClick={() => { setModalData(item); setModal('reorder'); }}>Adjust</button></td></tr>; })}{!items.length && <tr><td colSpan={7}><EmptyState title="No stock items match" description="Try a different search term or add a new item." /></td></tr>}</tbody></table></div></section></>; }
 

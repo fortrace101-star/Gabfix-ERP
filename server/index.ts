@@ -10,6 +10,7 @@ import { expensesRouter } from './routes/expenses';
 import { inventoryRouter } from './routes/inventory';
 import { jobsRouter } from './routes/jobs';
 import { servicesRouter } from './routes/services';
+import { eventsRouter } from './routes/events';
 import { workspaceRouter } from './routes/workspace';
 import { guard, requireScope } from './middleware/auth';
 
@@ -65,11 +66,12 @@ app.use('/api/equipment', scoped('admin', 'laundry'), equipmentRouter);
 app.use('/api/expenses', scoped('admin', 'laundry', 'store', 'portal'), expensesRouter);
 app.use('/api/services', scoped('admin', 'laundry', 'store', 'portal'), servicesRouter);
 app.use('/api/inventory', scoped('admin', 'laundry', 'store'), inventoryRouter);
+app.use('/api/events', eventsRouter); // SSE stream (Phase 0.11)
 app.use('/api', adminRouter); // POST /api/import, POST /api/reset (owner-only inside)
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
-const port = Number(process.env.PORT) || 4000;
+const port = Number(process.env.PORT) || 5000;
 
 async function main() {
   // Make sure the database, its schema and demo data exist before serving.
