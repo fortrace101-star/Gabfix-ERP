@@ -16,8 +16,7 @@ Monorepo with two projects:
 3. Run the API and the web app together:
    ```
    npm run dev
-   ```
-   - API: http://localhost:4000 (also proxied under `/api` for the web app)
+   ```    - API: http://localhost:5000 (also proxied under `/api` for the web app)
    - Web: http://localhost:5173
 
    On startup the server bootstraps the database automatically: it creates the

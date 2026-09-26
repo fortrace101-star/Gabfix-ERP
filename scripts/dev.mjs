@@ -37,7 +37,7 @@ let exiting = false;
 
 // On Windows, child.kill() only kills the npm.cmd shell wrapper — the spawned
 // node processes (vite dev servers, tsx server) survive as orphans and keep
-// their ports (5173–5176, 4000) occupied, breaking the next `npm run dev`.
+// their ports (5173–5176, 5000) occupied, breaking the next `npm run dev`.
 // taskkill /T kills the entire process tree; on POSIX, kill the child first so
 // npm forwards SIGTERM to the run-script process it spawned.
 const killTree = (child) => {
