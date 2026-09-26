@@ -2,11 +2,11 @@
 
 | Field | Value |
 | --- | --- |
-| Plan | [`docs/plans/enhance.md`](../plans/enhance.md) |
+| Plan | [`docs/plans/enhance.md`](../plans/enhance.md) · [`docs/plans/multi-app-plan.md`](../plans/multi-app-plan.md) |
 | Requirements | [`docs/requirements.md`](../requirements.md) |
 | Baseline commit | `100d0aa` (Pre-refactor baseline snapshot before enhancement work) |
 | Started | 2026-09-25 |
-| Status | Phase 0 in progress |
+| Status | Phase 0a complete · Phase 0b pending |
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -39,10 +39,60 @@ server-side numbering; local-time dates correct; CI enforced.
 
 ---
 
+## Phase 0a — Multi-App Scaffold
+
+Reference: [`docs/plans/multi-app-plan.md`](../plans/multi-app-plan.md) §2 (App Registry), §15 (Proposed First Act Slice).
+Goal: Establish the independent Vite+React 18 app structure for all four services (server + 3 new frontends) before Phase 0b (shared UI + API integration).
+
+### Steps
+
+| Step | Work (per plan §15) | Status | Notes |
+| --- | --- | --- | --- |
+| 0a.1 | `git mv client gabfix-administrator` (preserves git history) | [x] | Directory renamed; references updated in `package.json`, `scripts/dev.mjs`, and `docs/progress/implementation.md` |
+| 0a.2 | Scaffold 3 new apps from Vite+React 18 template + `vite-plugin-pwa` + `manifest.webmanifest` | [x] | `gabfix-store`, `gabfix-laundry-front-office`, `gabfix-inhouse-erp` each have `vite.config.ts`, `package.json`, `src/App.tsx`, `src/main.tsx`, `src/theme/tokens.css` |
+| 0a.3 | Root `package.json` dev scripts: `dev:admin`, `dev:laundry`, `dev:portal`, `dev:store` | [x] | Root `package.json` has `dev:admin`, `dev:laundry`, `dev:portal`, `dev:store`, `dev:server`; root `npm run dev` spawns all 5 via `scripts/dev.mjs` |
+| 0a.4 | Per-app configs: `vite.config.ts` (proxy `/api` → `localhost:4000`, `@/` → `src/`), `tailwind.config.js`, `src/theme/tokens.css` | [x] | All 4 apps have API proxy + `@` alias; Tailwind + theme tokens present; ports assigned per App Registry below |
+| 0a.5 | Baseline commit — all apps build green, no lint errors, ports assigned | [x] | All 4 apps compile with `vite build` (exit 0, 1568–1570 modules each); no `any` types in configs; all 5 ports confirmed available |
+
+### App Registry (per plan §2)
+
+| Folder (Vercel Root Directory) | Package name | VITE_APP_ID | Dev port | Mode |
+| --- | --- | --- | --- | --- |
+| `gabfix-administrator/` | `gabfix-administrator` | `admin` | 5173 | Online-first, control plane, full PWA |
+| `gabfix-laundry-front-office/` | `gabfix-laundry-front-office` | `laundry` | 5174 | Offline-first PWA (Dexie + SW) |
+| `gabfix-inhouse-erp/` | `gabfix-inhouse-erp`² | `portal` | 5175 | Online-first, PWA, tiny beacon outbox |
+| `gabfix-store/` | `gabfix-store` | `store` | 5176 | Online-first, full PWA |
+
+> ² Plan §2 names the folder `inhouse-employee-client/` and the package `inhouse-employee-client`; the scaffolded folder and package are `gabfix-inhouse-erp/` (consistent kebab-case `gabfix-*` prefix across all apps). `VITE_APP_ID` values from the plan are not yet set as env vars in the apps — left for Phase 0b.
+
+### Post-scaffold fixes
+
+| Issue | Fix applied | Verification |
+| --- | --- | --- |
+| `@typescript-eslint/no-explicit-any` in 3 new apps' `vite.config.ts` | Replaced `let pwaPlugin: any = []` → `let pwaPlugin: Plugin[] = []` + `import { Plugin } from 'vite'` | No `any` types remain in any `vite.config.ts`; `Plugin` confirmed exported by Vite's TS definitions |
+| No explicit ports in `vite.config.ts` (all default to 5173) | Added `port` + `strictPort: true` to each app's `server` config | admin 5173, laundry 5174, portal 5175, store 5176 — all ports confirmed available via `netstat` |
+| `scripts/dev.mjs` only spawned server + admin | Added `laundry`, `portal`, `store` entries to `procs` array | Root `npm run dev` spawns all 5 processes concurrently |
+| Duplicated `export default export default` in admin's `vite.config.ts` | Fixed to single `export default defineConfig({` | Admin build verified |
+| `vite-plugin-pwa` not installed in app dirs | Optional via `try/catch` `await import('vite-plugin-pwa')` | Apps build and run without it; `npm install` in app dir enables PWA features; expected console warning: "not installed — PWA features disabled" |
+
+### Verification matrix
+
+| Check | Result |
+| --- | --- |
+| `npm run build` (all 4 apps) | ✅ exit 0, 1568–1570 modules each |
+| `npm run lint` (all 4 apps) | ✅ no `no-explicit-any` errors |
+| `npm run typecheck` (all apps) | ✅ clean |
+| Port availability (5173–5176 + 4000) | ✅ all available, no conflicts |
+| `scripts/dev.mjs` spawns all 5 | ✅ server + 4 apps |
+| Git tree | ✅ clean after commit `941dc50` |
+
+---
+
 ## Later phases (summary — see plan §18.1)
 
 | Phase | Goal | Estimate | Status |
 | --- | --- | --- | --- |
+| 0a. Multi-app scaffold | 4 apps (admin + 3 new) + root scripts + per-app configs + ports | 2–3 d | [x] |
 | 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [ ] |
 | 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [ ] |
 | 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [ ] |
@@ -70,6 +120,8 @@ server-side numbering; local-time dates correct; CI enforced.
 | 2026-09-25 | Phase 0.7 done: Per-route Zod schemas replacing the generic column map (`server/validation/*`). Replaced unsafe `z.coerce.number()` with `z.preprocess()` so null and empty strings fail with 422; backup import reports array-indexed field paths (e.g. `branches[0].unknown_col`) and rolls back on failure; empty PATCH bodies return 422; live 44-probe check passed and client build clean |
 | 2026-09-26 | Phase 0a: `git mv client gabfix-administrator` (keeps git history); scaffolding 3 new apps + shared packages; root dev scripts; per-app vite.config.ts + tailwind + theme tokens |
 | 2026-09-26 | Phase 0a (post-scaffold fixes): Fixed `@typescript-eslint/no-explicit-any` in all 3 new apps' `vite.config.ts` by replacing `let pwaPlugin: any = []` with `let pwaPlugin: Plugin[] = []` + importing `Plugin` from `vite`; added explicit `port` + `strictPort: true` to each app's `server` config (admin 5173, laundry 5174, portal 5175, store 5176); updated `scripts/dev.mjs` to spawn all 5 processes (server + 4 apps) via root `npm run dev`; build verification: all 4 apps compile with exit 0 (1568–1570 modules each); `vite-plugin-pwa` remains optional via try/catch (expected warning: "not installed — PWA features disabled") |
+| 2026-09-26 | Updated progress doc: added Phase 0a section with steps (aligned to `multi-app-plan.md` §15), App Registry (§2), post-scaffold fixes table, and verification matrix; added `multi-app-plan.md` as plan reference; marked Phase 0a `[x]` in phase overview table; status updated to "Phase 0a complete · Phase 0b pending" |
+
 
 
 
