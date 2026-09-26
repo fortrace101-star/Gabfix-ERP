@@ -31,16 +31,6 @@ try {
             expiration: { maxAgeSeconds: 300 },
           },
         },
-        {
-          urlPattern: ({ url }) => url.pathname.startsWith('/api/beacon'),
-          handler: 'BackgroundSync',
-          options: {
-            backgroundSync: {
-              name: 'beacon-outbox',
-              maxRetentionTime: 1440, // 24 hours
-            },
-          },
-        },
       ],
     },
   })];
