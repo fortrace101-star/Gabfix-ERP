@@ -5,6 +5,48 @@ import { spawn, execSync } from 'node:child_process';
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const isWin = process.platform === 'win32';
 
+const STACK_PORTS = [5000, 5173, 5174, 5175, 5176];
+
+/**
+ * Reap stale listeners from a previous run before spawning. The old stack's
+ * node processes survive their parent on Windows (taskkill /T is the only
+ * reliable cleanup, and Ctrl+C in some terminals never sends it), so the
+ * next boot used to die in a cascade: Vite can't bind 5173 → child exits →
+ * the fail-fast shutdown below kills the whole new stack. We only ever kill
+ * node.exe owners — a foreign app squatting on a port is left alone and
+ * still produces the usual clear Vite error.
+ */
+function reapStaleListeners() {
+  if (!isWin) return;
+  let listeners;
+  try {
+    listeners = execSync('netstat -ano', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return; // netstat unavailable — let the normal bind errors speak
+  }
+  const pids = new Set();
+  for (const line of listeners.split('\n')) {
+    const columns = line.trim().split(/\s+/);
+    if (columns.length < 5 || columns[3] !== 'LISTENING') continue;
+    const localPort = Number(columns[1].replace(/^.*:/, ''));
+    const pid = Number(columns[4]);
+    if (STACK_PORTS.includes(localPort) && pid > 0) pids.add(pid);
+  }
+  for (const pid of pids) {
+    let image = '';
+    try {
+      image = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch { continue; }
+    if (!/^"node\.exe"/i.test(image.trim())) continue; // never kill a non-node owner
+    try {
+      execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
+      console.log(`[dev] reaped stale node.exe (pid ${pid}) holding a stack port`);
+    } catch { /* already gone */ }
+  }
+}
+
+reapStaleListeners();
+
 const procs = [
   { name: 'server', args: ['--prefix', 'server', 'run', 'dev'] },
   { name: 'admin',  args: ['--prefix', 'gabfix-administrator', 'run', 'dev'] },
