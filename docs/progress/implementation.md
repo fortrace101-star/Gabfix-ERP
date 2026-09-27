@@ -6,7 +6,7 @@
 | Requirements | [`docs/requirements.md`](../requirements.md) |
 | Baseline commit | `100d0aa` (Pre-refactor baseline snapshot before enhancement work) |
 | Started | 2026-09-25 |
-| Status | Phase 0a complete · Phase 0b complete · Phase 0c complete (identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, client split, SSE, tests+CI) · **Phase 1 in progress** — 1a money spine done (payments, ledger, numbering) · 1b job dates/assignments done; costing, assets, laundry next |
+| Status | Phase 0a complete · Phase 0b complete · Phase 0c complete (identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, client split, SSE, tests+CI) · **Phase 1 in progress** — 1a money spine ✅ · 1b job dates/assignments ✅ · 1c costing ✅; assets (1d) and laundry (1e) next |
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -330,6 +330,33 @@ Migration `009_jobs_dates.sql` (plan's "004_jobs_dates_assignments", renumbered,
 
 ---
 
+### 1c — Job costing: suppliers, cost categories, cost lines, timesheets ✅
+
+Migration `010_costing.sql` (plan's "006_costing", renumbered): `suppliers` (2 seeded), `cost_categories` (Materials/Labour/Subcontract → 5000 direct; Transport/Other → 6000 indirect, each with its GL account from 008), `timesheets` (field hours, ended_at > started_at CHECK), `job_costs` (the lines: qty × unit_cost or explicit amount, source manual/timesheet/inventory/import, timesheet backlink with a **partial unique index** so a timesheet can never be costed twice).
+
+Exit-criterion rule: **once a job has at least one cost line, the lines own `jobs.cost`** — every cost write recomputes `jobs.cost = SUM(job_costs.amount)`; jobs without lines keep their legacy 36% estimate per the plan's "keep the old values visible until the ledger is accepted" note.
+
+| Step | Work | Status | Notes |
+| --- | --- | --- | --- |
+| 1c.1 | Migration `010_costing.sql` + seeds + triggers; `timesheets` created before `job_costs` (FK order, the 008 lesson) | [x] | Reference data (suppliers, categories) survives /api/reset like payment_methods — only job-scoped rows cascade with jobs |
+| 1c.2 | `services/costing.ts` — `addJobCost(InTx)` with amount = qty × unit_cost (rounded) or explicit; `recomputeJobCost` guarded by EXISTS so estimate-only jobs are untouched; `approveTimesheet(InTx)` stamps minutes + approver, derives minutes from the clock pair when absent, and inserts the linked labour line idempotently (ON CONFLICT on the partial index) | [x] | Approval rejects already-approved, job-less and still-open sheets with clear errors |
+| 1c.3 | `validation/costing.ts` — `jobCostCreate` (refine: amount or unitCost required), `timesheetCreate` (ISO timestamp regex), strict schemas | [x] | Unknown fields → 422 |
+| 1c.4 | `routes/costing.ts` mounted at `/api` (admin + portal scopes): POST `/api/costs`, POST `/api/timesheets`, POST `/api/timesheets/:id/approve`; each broadcasts `job-updated` so every open admin refreshes | [x] | Reuses the SSE event type that already exists client-side |
+| 1c.5 | Read layer: `/api/data` gains `costCategories` + `suppliers` (job costs themselves stay a per-job concern; a listing endpoint arrives with the costing UI) | [x] | Client types pick these up with the Phase 1 UI slice |
+| 1c.6 | Tests: 4 new (refinement + computation, unknown-field rejection, timesheet ISO pair, DB integration: estimate→lines flip, 75000 two-line total, 240-min approval = 60000 labour at 15000/h, re-approval rejected with no double-cost, cascade cleanup) — suite now 32/32 | [x] | Integration rolls back; the approveTimesheet→InTx split fixed the same committed-fixture trap the payments tests hit |
+
+### 1c Verification matrix
+
+| Check | Result |
+| --- | --- |
+| `npm run db:migrate` applies 010 | ✅ applied cleanly on the dev DB |
+| Server typecheck | ✅ 0 errors |
+| Server tests | ✅ 32/32 (was 28; +4 costing) |
+| Recompute invariant (in-test) | ✅ 180000 legacy estimate → 30000 → 75000 → 135000 (with labour); estimate-only jobs untouched |
+| Idempotent approval | ✅ second approve rejected; exactly one timesheet-sourced line |
+
+---
+
 ### 1a Verification matrix
 
 | Check | Result |
@@ -354,7 +381,7 @@ Migration `009_jobs_dates.sql` (plan's "004_jobs_dates_assignments", renumbered,
 | 0a. Multi-app scaffold | 4 apps (admin + 3 new) + root scripts + per-app configs + ports | 2–3 d | [x] |
 | 0b. Theme, components & PWA shells | Vendored tokens + useTheme + StatusBadge + PWA manifests | 1–2 d | [x] |
 | 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; branches removed; §0.9/§0.10/§0.11/§0.12 all done | 3–5 d | [x] |
-| 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [~] — 1a payments+ledger, 1b job dates/assignments done |
+| 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [~] — 1a payments+ledger, 1b job dates, 1c costing done |
 | 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [ ] |
 | 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [ ] |
 | 4. Field operations | Employees, devices, assignments, `/field` beacon, live map, geofences | 8–12 d | [ ] |
@@ -400,6 +427,7 @@ Migration `009_jobs_dates.sql` (plan's "004_jobs_dates_assignments", renumbered,
 | 2026-09-27 | Smoke test of the full stack after the port move: all 4 apps served their titles on 5173–5176, `/api/health` green through the 5173 proxy, SSE streamed through the proxy, `scripts/dev.mjs` shutdown freed every port. Also cleared two duplicate nodemon→tsx chains that were fighting over :5000 |
 | 2026-09-27 | Phase 0c.2c done (§0.10) — **Phase 0c complete**: admin client split into `app/` (store.tsx react-query context, realtime.ts SSE hook, layout/Sidebar+Topbar), `features/` (9 views incl. modals), `lib/` (money, csv, format, profile), `components/ui.tsx`; react-router-dom deep links + @tanstack/react-query cache; `App.tsx` 641 → 92 lines; lint baseline 20 → 0 errors. Verified: typecheck 0, build + PWA green, 9 deep links 200 on the live server, root typecheck 0, server tests 17/17 |
 | 2026-09-27 | Dev-env fix — admin "ENOENT react/index.js while updating dependencies": root cause was an accidental npm **workspaces** install at the repo root (root `package-lock.json` created during 0c.2c), which hoisted all app deps to `node_modules/` while vite's per-app optimizer and the per-app locks expected standalone installs; the stale admin lock (missing react-router-dom/@tanstack/react-query) then reconciled `node_modules` down and deleted react itself. Fix: removed `workspaces` from root `package.json`, deleted root `package-lock.json`/`node_modules`, clean `npm install` per app dir (matching CI's per-app `npm ci`). Verified: all 4 apps have react locally, stack boots with 0 errors in the log, admin modules transform 200, ports freed |
+| 2026-09-27 | Phase 1c done — job costing: `010_costing.sql` (suppliers, cost_categories with GL links, job_costs, timesheets; partial unique index makes a timesheet un-double-costable), `services/costing.ts` (cost-line insert + jobs.cost recompute once lines exist — the plan's "job cost comes from real cost lines" exit criterion; timesheet approval derives minutes and posts the labour line idempotently), `/api/costs` + `/api/timesheets(/:id/approve)` routes (admin+portal, job-updated SSE), `costCategories`+`suppliers` in /api/data. Tests 28 → 32. Verified: typecheck 0, migrate clean, estimate→lines flip and idempotent re-approval probed in-test |
 | 2026-09-27 | Phase 1b done — job dates & assignments: `009_jobs_dates.sql` adds job lifecycle dates (scheduled/quote/promised), instants (started/completed/invoiced/paid — server-managed), salesperson/manager attribution, site address + coordinates, priority; `job_events` + `job_assignments` tables; legacy `date` backfilled everywhere. jobsResource create/patch extended; `/api/data` jobs select widened. Tests 23 → 28. Verified: typecheck 0, migrate clean on dev DB, backfill + cascade probed in-test |
 | 2026-09-27 | Phase 1a done — money spine: `008_money.sql` (chart_of_accounts, payment_methods, payments, journal_entries/lines, PAY/JNL sequence defence), `services/ledger.ts` (balanced postJournalEntry), `services/payments.ts` (createPaymentInTx: PAY numbering + journal + invoice/laundry/customer balance recompute in one transaction), `routes/payments.ts` + `/api/payments` mount, `payments` key in `/api/data`, `payment-created` SSE, money tables added to TRUNCATE set. Verified: server typecheck 0, tests 23/23 (integration tests rollback-clean), live probe: PAY-00003/JNL-00003 balanced, invoice i1 Partially Paid, c2 balance 3,000,000 |
 

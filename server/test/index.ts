@@ -7,3 +7,4 @@ import './validation.test.ts';
 import './auth.test.ts';
 import './payments.test.ts';
 import './jobs-dates.test.ts';
+import './costing.test.ts';
