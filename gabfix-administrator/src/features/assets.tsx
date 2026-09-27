@@ -1,20 +1,42 @@
 import { useState } from 'react';
-import { AlertTriangle, ArrowUpRight, CalendarDays, Package, Plus, Search, Wrench } from 'lucide-react';
+import { AlertTriangle, ArrowUpRight, CalendarDays, Package, Plus, Search, TrendingDown, Wrench } from 'lucide-react';
 import { PageHeader, Button, EmptyState, MiniStat, SelectFilter } from '../components/ui';
 import StatusBadge from '../components/StatusBadge';
 import { useWorkspace } from '../app/store';
 import { isMaintenanceDue } from '../lib/dates';
 import { money } from '../lib/money';
+import * as api from '../api';
+import type { Equipment } from '../types';
 
 /** Equipment + inventory views (Phase 0.10 client split). */
 
+/** Post the next straight-line month for an asset (Phase 1d); the server owns the schedule. */
+function useDepreciate(notify: (message: string) => void, refresh: () => Promise<void>) {
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const depreciate = async (asset: Equipment) => {
+    if (busyId) return;
+    setBusyId(asset.id);
+    try {
+      const result = await api.depreciateAsset(asset.id);
+      await refresh();
+      notify(`Posted ${money(result.amount)} depreciation for ${asset.name} (${result.period}); book value ${money(result.bookValue)}`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Could not post depreciation');
+    } finally {
+      setBusyId(null);
+    }
+  };
+  return { depreciate, busyId };
+}
+
 export function EquipmentView() {
-  const { data, setModal, setModalData } = useWorkspace();
+  const { data, setModal, setModalData, notify, refresh } = useWorkspace();
+  const { depreciate, busyId } = useDepreciate(notify, refresh);
   const assets = data.equipment;
   const total = assets.reduce((sum, item) => sum + item.bookValue, 0);
   const maintenanceDue = assets.filter(item => isMaintenanceDue(item.nextMaintenance)).length;
-  const accumulated = Math.max(0, assets.reduce((sum, item) => sum + item.value, 0) - total);
-  return <><PageHeader eyebrow="Assets" title="Equipment & machines" description="Know what you own, what it costs, and what needs attention." action={<Button icon={<Plus size={17} />} onClick={() => setModal('equipment')}>Add equipment</Button>} /><div className="stat-row"><MiniStat label="Book value" value={money(total)} tone="blue" /><MiniStat label="Assets in service" value={`${assets.length - maintenanceDue}/${assets.length}`} tone="green" /><MiniStat label="Maintenance due" value={String(maintenanceDue)} tone="amber" /><MiniStat label="Accumulated depreciation" value={money(accumulated)} tone="rose" /></div><div className="asset-grid">{assets.map(item => <article className="asset-card" key={item.id}><div className="asset-top"><span className="asset-visual"><Wrench size={22} /></span><button className="more-button" onClick={() => { setModalData(item); setModal('equipment-update'); }}>Update</button></div><span className="eyebrow">{item.type}</span><h3>{item.name}</h3><small className="serial-number">SN: {item.serialNumber}</small><div className="asset-meta"><StatusBadge value={item.condition} /></div><div className="asset-value"><div><small>Current book value</small><strong>{money(item.bookValue)}</strong></div><div><small>Usage</small><strong>{item.usage.toLocaleString()} hrs</strong></div></div><div className="asset-footer"><span><CalendarDays size={13} /> Service due {item.nextMaintenance}</span><ArrowUpRight size={15} /></div></article>)}</div></>;
+  const accumulated = Math.max(0, assets.reduce((sum, item) => sum + (item.cost ?? item.value), 0) - total);
+  return <><PageHeader eyebrow="Assets" title="Equipment & machines" description="Know what you own, what it costs, and what needs attention." action={<Button icon={<Plus size={17} />} onClick={() => setModal('equipment')}>Add equipment</Button>} /><div className="stat-row"><MiniStat label="Book value" value={money(total)} tone="blue" /><MiniStat label="Assets in service" value={`${assets.length - maintenanceDue}/${assets.length}`} tone="green" /><MiniStat label="Maintenance due" value={String(maintenanceDue)} tone="amber" /><MiniStat label="Accumulated depreciation" value={money(accumulated)} tone="rose" /></div><div className="asset-grid">{assets.map(item => <article className="asset-card" key={item.id}><div className="asset-top"><span className="asset-visual"><Wrench size={22} /></span><button className="more-button" onClick={() => { setModalData(item); setModal('equipment-update'); }}>Update</button></div><span className="eyebrow">{item.type}</span><h3>{item.name}</h3><small className="serial-number">SN: {item.serialNumber}</small><div className="asset-meta"><StatusBadge value={item.condition} /></div><div className="asset-value"><div><small>Current book value</small><strong>{money(item.bookValue)}</strong></div><div><small>{item.accumulatedDepreciation ? `Depreciated ${money(item.accumulatedDepreciation)}` : `${item.usage.toLocaleString()} hrs`}</small></div></div><div className="asset-footer"><span><CalendarDays size={13} /> Service due {item.nextMaintenance}</span><button className="more-button" disabled={busyId === item.id || item.disposedAt != null} title={item.disposedAt ? 'Asset is disposed' : 'Post the next month of straight-line depreciation'} onClick={() => void depreciate(item)}><TrendingDown size={14} /> Depreciate</button></div></article>)}</div></>;
 }
 
 export function InventoryView() {

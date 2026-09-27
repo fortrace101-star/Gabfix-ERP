@@ -33,6 +33,18 @@ export const createService = (service: Record<string, unknown>) =>
 export const createEquipment = (equipment: Record<string, unknown>) =>
   request('/api/equipment', { method: 'POST', body: JSON.stringify(equipment) });
 
+/** Post one month of straight-line depreciation for an asset (Phase 1d). */
+export const depreciateAsset = (id: string) =>
+  request(`/api/assets/${id}/depreciate`, { method: 'POST' });
+
+/** Laundry intake: a priced order with optional lines (Phase 1e). */
+export const createLaundryIntake = (intake: Record<string, unknown>) =>
+  request('/api/laundry', { method: 'POST', body: JSON.stringify(intake) });
+
+/** Move a laundry order to its next fulfilment stage. */
+export const updateLaundryStatus = (id: string, status: string) =>
+  request(`/api/laundry/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+
 export const updateEquipment = (id: string, patch: Record<string, unknown>) =>
   request(`/api/equipment/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
 

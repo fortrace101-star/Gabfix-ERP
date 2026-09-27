@@ -1,18 +1,19 @@
 import { useState, type FormEvent } from 'react';
-import { Check, X } from 'lucide-react';
+import { Check, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '../components/ui';
 import { useWorkspace, today } from '../app/store';
+import { money } from '../lib/money';
 import * as api from '../api';
-import type { AppData, Equipment, InventoryItem, Job, JobStatus } from '../types';
+import type { AppData, Equipment, InventoryItem, Job, JobStatus, LaundryOrder } from '../types';
 
 /** Every workspace modal (Phase 0.10 client split): create forms + record update dialogs. */
 
-const MODAL_TITLES: Record<string, string> = { job: 'Create a new job', customer: 'Add a customer', expense: 'Record an expense', service: 'Add a service', equipment: 'Add equipment', 'equipment-update': 'Update equipment', inventory: 'Add a stock item', reorder: 'Record stock movement', 'job-status': 'Update job status' };
+const MODAL_TITLES: Record<string, string> = { job: 'Create a new job', customer: 'Add a customer', expense: 'Record an expense', service: 'Add a service', equipment: 'Add equipment', 'equipment-update': 'Update equipment', inventory: 'Add a stock item', reorder: 'Record stock movement', 'job-status': 'Update job status', 'laundry-intake': 'New laundry intake', 'laundry-status': 'Update laundry status' };
 
 export function ModalShell() {
   const { modal, setModal, setModalData, modalData, data, notify, refresh } = useWorkspace();
   const close = () => { setModal(null); setModalData(null); };
-  return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}><div className="modal"><div className="modal-header"><div><span className="eyebrow">Gabfix workspace</span><h2>{modal ? MODAL_TITLES[modal] : ''}</h2></div><button className="icon-button" onClick={close}><X size={18} /></button></div>{modal === 'job' && <JobForm data={data} close={close} notify={notify} refresh={refresh} />}{modal === 'customer' && <CustomerForm close={close} notify={notify} refresh={refresh} />}{modal === 'expense' && <ExpenseForm close={close} notify={notify} refresh={refresh} />}{modal === 'service' && <ServiceForm close={close} notify={notify} refresh={refresh} />}{modal === 'equipment' && <EquipmentForm close={close} notify={notify} refresh={refresh} />}{Boolean(modalData) && modal === 'job-status' && <JobStatusModal job={modalData as Job} data={data} close={close} notify={notify} refresh={refresh} />}{modal === 'inventory' && <InventoryForm close={close} notify={notify} refresh={refresh} />}{Boolean(modalData) && modal === 'equipment-update' && <EquipmentUpdateModal equipment={modalData as Equipment} data={data} close={close} notify={notify} refresh={refresh} />}{Boolean(modalData) && modal === 'reorder' && <StockMovementModal item={modalData as InventoryItem} close={close} notify={notify} refresh={refresh} />}</div></div>;
+  return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}><div className="modal"><div className="modal-header"><div><span className="eyebrow">Gabfix workspace</span><h2>{modal ? MODAL_TITLES[modal] : ''}</h2></div><button className="icon-button" onClick={close}><X size={18} /></button></div>{modal === 'job' && <JobForm data={data} close={close} notify={notify} refresh={refresh} />}{modal === 'customer' && <CustomerForm close={close} notify={notify} refresh={refresh} />}{modal === 'expense' && <ExpenseForm close={close} notify={notify} refresh={refresh} />}{modal === 'service' && <ServiceForm close={close} notify={notify} refresh={refresh} />}{modal === 'equipment' && <EquipmentForm close={close} notify={notify} refresh={refresh} />}{Boolean(modalData) && modal === 'job-status' && <JobStatusModal job={modalData as Job} data={data} close={close} notify={notify} refresh={refresh} />}{modal === 'inventory' && <InventoryForm close={close} notify={notify} refresh={refresh} />}{Boolean(modalData) && modal === 'equipment-update' && <EquipmentUpdateModal equipment={modalData as Equipment} data={data} close={close} notify={notify} refresh={refresh} />}{Boolean(modalData) && modal === 'reorder' && <StockMovementModal item={modalData as InventoryItem} close={close} notify={notify} refresh={refresh} />}{modal === 'laundry-intake' && <LaundryIntakeForm data={data} close={close} notify={notify} refresh={refresh} />}{Boolean(modalData) && modal === 'laundry-status' && <LaundryStatusModal order={modalData as LaundryOrder} close={close} notify={notify} refresh={refresh} />}</div></div>;
 }
 
 function JobStatusModal({ job, data, close, notify, refresh }: { job: Job; data: AppData; close: () => void; notify: (message: string) => void; refresh: () => Promise<void> }) {
@@ -186,4 +187,99 @@ function EquipmentUpdateModal({ equipment, data, close, notify, refresh }: { equ
   };
   void data;
   return (<form onSubmit={submit} className="modal-form"><div className="form-grid"><label className="full">Asset<strong>{equipment.name}</strong><small>SN: {equipment.serialNumber} · {equipment.type}</small></label><label>Book value (UGX)<input type="number" min="0" value={form.bookValue} onChange={event => update('bookValue', event.target.value)} /></label><label>Condition<select value={form.condition} onChange={event => update('condition', event.target.value)}><option>Good</option><option>Fair</option><option>Poor</option><option>Out of service</option></select></label><label>Usage (hours)<input type="number" min="0" value={form.usage} onChange={event => update('usage', event.target.value)} /></label><label>Service due<input type="date" value={form.nextMaintenance} onChange={event => update('nextMaintenance', event.target.value)} /></label></div><div className="modal-actions"><Button variant="secondary" onClick={close}>Cancel</Button><Button icon={<Check size={16} />}>Save changes</Button></div></form>);
+}
+
+/** Laundry intake (Phase 1e): customer, promise, weight/pieces and priced lines. */
+function LaundryIntakeForm({ data, close, notify, refresh }: { data: AppData; close: () => void; notify: (message: string) => void; refresh: () => Promise<void> }) {
+  const [form, setForm] = useState({ customerId: data.customers[0]?.id ?? '', promisedAt: '', weightKg: '', pieces: '', items: '' });
+  const [lines, setLines] = useState<{ description: string; qty: string; unitPrice: string }[]>([{ description: '', qty: '1', unitPrice: '' }]);
+  const update = (key: string, value: string) => setForm(previous => ({ ...previous, [key]: value }));
+  const updateLine = (index: number, key: string, value: string) => setLines(previous => previous.map((line, i) => (i === index ? { ...line, [key]: value } : line)));
+  const addLine = () => setLines(previous => [...previous, { description: '', qty: '1', unitPrice: '' }]);
+  const removeLine = (index: number) => setLines(previous => (previous.length > 1 ? previous.filter((_, i) => i !== index) : previous));
+  const total = lines.reduce((sum, line) => sum + Number(line.qty || 0) * Number(line.unitPrice || 0), 0);
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!form.customerId) return;
+    (async () => {
+      try {
+        await api.createLaundryIntake({
+          customerId: form.customerId,
+          promisedAt: form.promisedAt || undefined,
+          weightKg: form.weightKg || undefined,
+          pieces: form.pieces || undefined,
+          items: form.items || undefined,
+          lines: lines
+            .filter(line => Number(line.qty) > 0 && Number(line.unitPrice) > 0)
+            .map(line => ({ description: line.description || undefined, qty: Number(line.qty), unitPrice: Number(line.unitPrice) })),
+        });
+        await refresh();
+        notify('Laundry intake recorded');
+      } catch {
+        notify('Could not record the intake');
+      }
+      close();
+    })();
+  };
+  return <form onSubmit={submit} className="modal-form">
+    <div className="form-grid">
+      <label className="full">Customer
+        <select required value={form.customerId} onChange={event => update('customerId', event.target.value)}>
+          {data.customers.map(item => <option key={item.id} value={item.id}>{item.company || item.name}</option>)}
+        </select>
+      </label>
+      <label>Promised date<input type="date" value={form.promisedAt} onChange={event => update('promisedAt', event.target.value)} /></label>
+      <label>Weight (kg)<input type="number" min="0" step="0.1" placeholder="e.g. 8.5" value={form.weightKg} onChange={event => update('weightKg', event.target.value)} /></label>
+      <label>Pieces<input type="number" min="0" step="1" placeholder="e.g. 22" value={form.pieces} onChange={event => update('pieces', event.target.value)} /></label>
+      <label className="full">Intake note<input placeholder="e.g. 10kg wash + iron" value={form.items} onChange={event => update('items', event.target.value)} /></label>
+    </div>
+    <div className="full" style={{ marginTop: 12 }}>
+      <strong>Priced lines</strong>
+      {lines.map((line, index) => <div key={index} style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <input style={{ flex: 2 }} placeholder="Description" value={line.description} onChange={event => updateLine(index, 'description', event.target.value)} aria-label="Line description" />
+        <input style={{ flex: 1 }} type="number" min="0" step="0.1" placeholder="Qty" value={line.qty} onChange={event => updateLine(index, 'qty', event.target.value)} aria-label="Line quantity" />
+        <input style={{ flex: 1 }} type="number" min="0" placeholder="Unit price" value={line.unitPrice} onChange={event => updateLine(index, 'unitPrice', event.target.value)} aria-label="Line unit price" />
+        <button type="button" className="icon-button" onClick={() => removeLine(index)} aria-label="Remove line" disabled={lines.length === 1}><Trash2 size={15} /></button>
+      </div>)}
+      <button type="button" className="linkish" style={{ marginTop: 8, background: 'none', border: 'none', cursor: 'pointer' }} onClick={addLine}><Plus size={14} /> Add line</button>
+      <div style={{ marginTop: 8 }}><strong>Total: {money(total)}</strong></div>
+    </div>
+    <div className="modal-actions">
+      <Button variant="secondary" onClick={close}>Cancel</Button>
+      <Button icon={<Check size={16} />}>Record intake</Button>
+    </div>
+  </form>;
+}
+
+/** Laundry status move (Phase 1e): the server stamps ready/collected, never the client. */
+function LaundryStatusModal({ order, close, notify, refresh }: { order: LaundryOrder; close: () => void; notify: (message: string) => void; refresh: () => Promise<void> }) {
+  const STAGES = ['Received', 'Washing', 'Drying', 'Ready', 'Collected'];
+  const [status, setStatus] = useState(order.status);
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    (async () => {
+      try {
+        await api.updateLaundryStatus(order.id, status);
+        await refresh();
+        notify(`Order ${order.number} moved to ${status}`);
+      } catch {
+        notify('Could not update the order');
+      }
+      close();
+    })();
+  };
+  return <form onSubmit={submit} className="modal-form">
+    <div className="form-grid">
+      <label className="full">Fulfilment stage
+        <select value={status} onChange={event => setStatus(event.target.value)}>
+          {STAGES.map(stage => <option key={stage}>{stage}</option>)}
+        </select>
+      </label>
+    </div>
+    <p style={{ margin: '8px 0 0' }}><small>Ready and Collected are stamped automatically when you move the order — the timeline cannot be backdated.</small></p>
+    <div className="modal-actions">
+      <Button variant="secondary" onClick={close}>Cancel</Button>
+      <Button icon={<Check size={16} />}>Save status</Button>
+    </div>
+  </form>;
 }

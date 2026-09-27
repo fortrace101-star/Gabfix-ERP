@@ -14,7 +14,7 @@ import { todayISO } from '../lib/dates';
  * fifteen props around.
  */
 
-export const emptyData: AppData = { customers: [], services: [], jobs: [], invoices: [], expenses: [], laundry: [], equipment: [], inventory: [] };
+export const emptyData: AppData = { customers: [], services: [], jobs: [], invoices: [], expenses: [], laundry: [], equipment: [], inventory: [], payments: [], costCategories: [], suppliers: [], depreciationEntries: [], laundryItems: [] };
 
 /** "Today" captured once per workspace load, exactly like the previous module constant. */
 export const today = todayISO();
