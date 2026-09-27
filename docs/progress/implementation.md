@@ -404,6 +404,17 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 
 ---
 
+### UI wiring — admin client consumes the Phase 1 spine ✅
+
+| Step | What | Status | Notes |
+| --- | --- | --- | --- |
+| UI.1 | Laundry intake modal (customer, promise, weight/pieces, priced lines with live total) + status-move dialog; "New laundry order" no longer opens the job modal (plan issue #11, client half) | [x] | Server-owned stamps are never editable; the dialog says so |
+| UI.2 | Orders table gains the In/Due/Ready/Out timeline, weight/pieces and a Status action; asset cards gain a Depreciate button that posts the next straight-line month | [x] | Accumulated depreciation replaces raw hours once the schedule starts |
+| UI.3 | `api.ts` + `types.ts` extended (depreciateAsset, createLaundryIntake, updateLaundryStatus; AppData gains payments/costCategories/suppliers/depreciationEntries/laundryItems); `laundry-updated` SSE registered | [x] | Typecheck 0, production build green |
+| UI.4 | Seed/backfill drift fixed: /api/reset re-seeds without the one-time migration backfills, so jobs lost scheduled dates, equipment lost cost (depreciation refused to run) and laundry seeds lost stamps | [x] | Seed replicates the idempotent WHERE-IS-NULL rules; reset→depreciate probed live; 38/38 green |
+
+---
+
 ### 1a Verification matrix
 
 | Check | Result |
@@ -477,6 +488,8 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 | 2026-09-27 | Phase 1c done — job costing: `010_costing.sql` (suppliers, cost_categories with GL links, job_costs, timesheets; partial unique index makes a timesheet un-double-costable), `services/costing.ts` (cost-line insert + jobs.cost recompute once lines exist — the plan's "job cost comes from real cost lines" exit criterion; timesheet approval derives minutes and posts the labour line idempotently), `/api/costs` + `/api/timesheets(/:id/approve)` routes (admin+portal, job-updated SSE), `costCategories`+`suppliers` in /api/data. Tests 28 → 32. Verified: typecheck 0, migrate clean, estimate→lines flip and idempotent re-approval probed in-test |
 | 2026-09-27 | Phase 1d done — asset register: `011_assets.sql` (equipment gains purchase/cost/salvage/useful-life/method/accumulated/disposal/custodian columns + backfill; `asset_depreciation_entries` unique per asset per period; GL 1400/1500/6100 seeded), `services/assets.ts` (straight-line posting debits depreciation expense and credits accumulated depreciation through the ledger; book value = cost − accumulated), POST `/api/assets/:id/depreciate` (admin, equipment-updated SSE), register fields in `/api/data` (+ `depreciationEntries`). `migrate()` gained a session advisory lock after the concurrent-test race. Tests 32 → 35. Verified: typecheck 0, live probe — a1 two 150,000 postings (JNL-00004/5), book value 9,700,000, schedule in /api/data |
 | 2026-09-27 | Phase 1e done — laundry logistics: `012_logistics.sql` (laundry_orders gains promised/ready/collected + job link + weight/pieces with backfill; `laundry_order_items` priced lines; branchless per decision #9), `services/laundry.ts` (priced intake claiming LDY numbers transactionally; status moves stamp ready/collected server-side, stamps never clear), POST `/api/laundry` + PATCH `/api/laundry/:id/status` (all four scopes, laundry-updated SSE — first laundry write path), logistics fields + `laundryItems` in /api/data. Tests 35 → 38. Verified: typecheck 0, live probe — LDY-00219 two-line 70000 intake, stage stamps on Ready/Collected, forged stamps 422. **Phase 1 complete — both plan exit criteria hold** |
+| 2026-09-27 | /api/reset drift fixed: the seed now replicates the 009/011/012 backfill rules (jobs scheduled/completed dates, equipment cost+useful life, laundry stamps) so reset matches a migrated database; depreciation worked again post-reset |
+| 2026-09-27 | Admin UI wired to the Phase 1 spine: laundry intake + status modals (closing the client half of plan issue #11), order timeline + weight/pieces in the table, Depreciate button on asset cards, AppData types extended with the Phase 1 keys, laundry-updated SSE; admin typecheck 0 + build green, UI-shaped payloads probed live |
 | 2026-09-27 | Phase 1b done — job dates & assignments: `009_jobs_dates.sql` adds job lifecycle dates (scheduled/quote/promised), instants (started/completed/invoiced/paid — server-managed), salesperson/manager attribution, site address + coordinates, priority; `job_events` + `job_assignments` tables; legacy `date` backfilled everywhere. jobsResource create/patch extended; `/api/data` jobs select widened. Tests 23 → 28. Verified: typecheck 0, migrate clean on dev DB, backfill + cascade probed in-test |
 | 2026-09-27 | Phase 1a done — money spine: `008_money.sql` (chart_of_accounts, payment_methods, payments, journal_entries/lines, PAY/JNL sequence defence), `services/ledger.ts` (balanced postJournalEntry), `services/payments.ts` (createPaymentInTx: PAY numbering + journal + invoice/laundry/customer balance recompute in one transaction), `routes/payments.ts` + `/api/payments` mount, `payments` key in `/api/data`, `payment-created` SSE, money tables added to TRUNCATE set. Verified: server typecheck 0, tests 23/23 (integration tests rollback-clean), live probe: PAY-00003/JNL-00003 balanced, invoice i1 Partially Paid, c2 balance 3,000,000 |
 
