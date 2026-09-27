@@ -5,6 +5,7 @@ import StatusBadge from '../components/StatusBadge';
 import { useWorkspace, today } from '../app/store';
 import { money } from '../lib/money';
 import { monthKeyOf, monthName } from '../lib/format';
+import { downloadDocument } from '../lib/pdf';
 import type { AppData, LaundryOrder } from '../types';
 
 /** Compact timeline under an order's number: received → promised → ready → collected. */
@@ -28,10 +29,10 @@ function getLaundryPaymentStatus(order: LaundryOrder) {
 }
 
 export function LaundryTable({ orders, data }: { orders: LaundryOrder[]; data: AppData }) {
-  const { setModal, setModalData } = useWorkspace();
+  const { setModal, setModalData, notify } = useWorkspace();
   return <div className="table-wrap"><table><thead><tr><th>Order</th><th>Status</th><th>Customer</th><th>Items & service</th><th>Timeline</th><th>Total</th><th>Payment Status</th><th></th></tr></thead><tbody>{orders.length ? orders.map(order => {
     const paymentStatus = getLaundryPaymentStatus(order);
-    return <tr key={order.id}><td><strong className="linkish">{order.number}</strong><small>{order.received}</small></td><td><StatusBadge value={order.status} /></td><td><strong>{data.customers.find(customer => customer.id === order.customerId)?.name}</strong><small>{data.customers.find(customer => customer.id === order.customerId)?.type}</small></td><td><strong>{order.items || '—'}</strong><small>{[order.weightKg ? `${order.weightKg} kg` : '', order.pieces ? `${order.pieces} pcs` : ''].filter(Boolean).join(' · ') || 'Machine wash & finish'}</small></td><td><LaundryTimeline order={order} /></td><td><strong>{money(order.total)}</strong><small className="profit-text">{order.total - order.paid ? `${money(order.total - order.paid)} balance` : 'Paid in full'}</small></td><td><StatusBadge value={paymentStatus} /></td><td><button className="more-button" onClick={() => { setModalData(order); setModal('laundry-status'); }}>Status</button></td></tr>;
+    return <tr key={order.id}><td><strong className="linkish">{order.number}</strong><small>{order.received}</small></td><td><StatusBadge value={order.status} /></td><td><strong>{data.customers.find(customer => customer.id === order.customerId)?.name}</strong><small>{data.customers.find(customer => customer.id === order.customerId)?.type}</small></td><td><strong>{order.items || '—'}</strong><small>{[order.weightKg ? `${order.weightKg} kg` : '', order.pieces ? `${order.pieces} pcs` : ''].filter(Boolean).join(' · ') || 'Machine wash & finish'}</small></td><td><LaundryTimeline order={order} /></td><td><strong>{money(order.total)}</strong><small className="profit-text">{order.total - order.paid ? `${money(order.total - order.paid)} balance` : 'Paid in full'}</small></td><td><StatusBadge value={paymentStatus} /></td><td><button className="more-button" onClick={() => { setModalData(order); setModal('laundry-status'); }}>Status</button> <button className="more-button" title="Download laundry ticket PDF" onClick={() => { void downloadDocument('laundry', order.id).catch(error => notify(error instanceof Error ? error.message : 'Download failed')); }}>PDF</button></td></tr>;
   }) : <tr><td colSpan={8}><EmptyState title="No orders match" /></td></tr>}</tbody></table></div>;
 }
 

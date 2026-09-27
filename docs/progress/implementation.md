@@ -463,6 +463,7 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 | 2b.2 | `services/pdf/reports.ts` — customer statement (all invoices + balance), AR aging (due-date buckets Current/30/60/90/90+), P&L from journal lines (income by net credit, expense by net debit, from/to range), asset register + depreciation schedule (per-asset posted entries) | [x] | The money spine pays off: P&L reads journal_lines grouped by account type |
 | 2b.3 | Route: `GET /api/documents/:type.pdf` (no-id form) for aging/assets/pl; pl accepts `?from=&to=`, defaults to YTD; entity form unchanged | [x] | |
 | 2b.4 | Tests: integration loop covers all 8 registered types; statement/P&L/aging/assets rendered from a rolled-back fixture — suite 41/41 | [x] | |
+| 2b.5 | Client: `lib/pdf.ts` (fetch→blob→save, filename from Content-Disposition) + PDF buttons on the receivables table (invoice), jobs table (job card), laundry table (ticket) and an AR-aging button on the finance header | [x] | Admin typecheck 0, build green; Vite /api proxy serves the same route |
 
 ### 2b Verification matrix
 
@@ -473,7 +474,7 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 | Live probes | ✅ AGING-2026-09-27.pdf (3,096 B, attachment disposition), assets register (3,175 B), P&L YTD + from/to (2,772/2,776 B), STMT-c2-2026-09-27.pdf (2,956 B) — all valid %PDF-1.3 |
 | Stack shutdown | ✅ ports free |
 
-Remaining in Phase 2 (plan §12): manifest, delivery note (gated on logistics UI flow), balance sheet, trip report (gated on Phase 4 telemetry), client PDF buttons, Inter font embedding.
+Remaining in Phase 2 (plan §12): manifest, delivery note (gated on logistics UI flow), balance sheet, trip report (gated on Phase 4 telemetry), Inter font embedding.
 
 ---
 
@@ -538,6 +539,7 @@ Remaining in Phase 2 (plan §12): manifest, delivery note (gated on logistics UI
 | 2026-09-27 | Phase 2a done — PDF documents: `pdfkit` + `services/pdf/layout.ts` (shared layout kit: header/meta/table/totals/footers, WinAnsi-safe sanitize), `services/pdf/documents.ts` (loaders for invoice, receipt, laundry ticket, job card; DOCUMENT_STORAGE_DIR mirroring with numbered filenames), GET `/api/documents/:type/:id.pdf` (all scopes, attachment disposition). Tests 38 → 41. Verified: typecheck 0, live probes — INV-00098.pdf 2,916 bytes / LDY-00216 ticket, 404s for unknown type+id, mirror populated |
 | 2026-09-27 | dev.mjs fail-fast cascade fixed: stale node.exe owners of 5000/5173-5176 are reaped before spawn (verified by orphaning five children and booting cleanly over them) |
 | 2026-09-27 | Phase 2b done — range/register reports: `services/pdf/reports.ts` (customer statement, AR aging with due-date buckets, P&L from journal lines by account type with from/to range, asset register + depreciation schedule), `services/pdf/shared.ts` (brand + mirror extracted), no-id route form `GET /api/documents/:type.pdf` (+ `?from=&to=` for P&L). All 8 registered types covered in-test; live probes render all five new endpoints |
+| 2026-09-27 | Client PDF buttons: `lib/pdf.ts` download helpers wired onto the invoice/job/laundry tables and the finance header's AR-aging action |
 | 2026-09-27 | Phase 1b done — job dates & assignments: `009_jobs_dates.sql` adds job lifecycle dates (scheduled/quote/promised), instants (started/completed/invoiced/paid — server-managed), salesperson/manager attribution, site address + coordinates, priority; `job_events` + `job_assignments` tables; legacy `date` backfilled everywhere. jobsResource create/patch extended; `/api/data` jobs select widened. Tests 23 → 28. Verified: typecheck 0, migrate clean on dev DB, backfill + cascade probed in-test |
 | 2026-09-27 | Phase 1a done — money spine: `008_money.sql` (chart_of_accounts, payment_methods, payments, journal_entries/lines, PAY/JNL sequence defence), `services/ledger.ts` (balanced postJournalEntry), `services/payments.ts` (createPaymentInTx: PAY numbering + journal + invoice/laundry/customer balance recompute in one transaction), `routes/payments.ts` + `/api/payments` mount, `payments` key in `/api/data`, `payment-created` SSE, money tables added to TRUNCATE set. Verified: server typecheck 0, tests 23/23 (integration tests rollback-clean), live probe: PAY-00003/JNL-00003 balanced, invoice i1 Partially Paid, c2 balance 3,000,000 |
 
