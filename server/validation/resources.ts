@@ -217,6 +217,9 @@ export const expensesResource: Resource = {
 /**
  * equipment — assets, their book value and the next maintenance date.
  */
+/** Depreciation schedule fields (Phase 1 asset register). */
+const DEPRECIATION_METHODS = ['straight-line', 'none'] as const;
+
 const equipmentCreate = z.strictObject({
   name: text,
   serialNumber: text,
@@ -226,6 +229,13 @@ const equipmentCreate = z.strictObject({
   condition: optionalText.optional(),
   nextMaintenance: optionalDateText,
   usage: optionalMoney,
+  purchaseDate: optionalDateText,
+  salvageValue: optionalMoney,
+  usefulLifeMonths: z
+    .preprocess((value) => (typeof value === 'string' && value.trim() !== '' ? Number(value) : value), z.number().int().positive('Must be a positive whole number of months'))
+    .optional(),
+  depreciationMethod: z.enum(DEPRECIATION_METHODS).optional(),
+  custodianEmployeeId: idText.optional(),
 });
 
 export const equipmentResource: Resource = {
@@ -241,9 +251,15 @@ export const equipmentResource: Resource = {
     condition: 'condition',
     nextMaintenance: 'next_maintenance',
     usage: 'usage',
+    purchaseDate: 'purchase_date',
+    salvageValue: 'salvage_value',
+    usefulLifeMonths: 'useful_life_months',
+    depreciationMethod: 'depreciation_method',
+    custodianEmployeeId: 'custodian_employee_id',
   },
   create: equipmentCreate,
   // Asset update modal plus the usage bump when a job completes.
+  // Accumulated depreciation is schedule-owned: postings move it, not PATCHes.
   patch: atLeastOneField(
     z.strictObject({
       name: text.optional(),
@@ -254,6 +270,13 @@ export const equipmentResource: Resource = {
       condition: optionalText.optional(),
       nextMaintenance: optionalDateText,
       usage: optionalMoney,
+      purchaseDate: optionalDateText,
+      salvageValue: optionalMoney,
+      usefulLifeMonths: z
+        .preprocess((value) => (typeof value === 'string' && value.trim() !== '' ? Number(value) : value), z.number().int().positive('Must be a positive whole number of months'))
+        .optional(),
+      depreciationMethod: z.enum(DEPRECIATION_METHODS).optional(),
+      custodianEmployeeId: idText.optional(),
     }),
   ),
   row: importRow(equipmentCreate),

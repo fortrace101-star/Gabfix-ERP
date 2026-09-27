@@ -23,13 +23,14 @@ export type AppData = {
   payments: unknown[];
   costCategories: unknown[];
   suppliers: unknown[];
+  depreciationEntries: unknown[];
 };
 
 const num = (value: unknown) => (value === null || value === undefined ? 0 : Number(value));
 
 /** Load the whole workspace from PostgreSQL, shaped exactly like the frontend AppData type. */
 export async function getData(): Promise<AppData> {
-  const [customers, services, jobs, invoices, expenses, laundry, equipment, inventory, payments, costCategories, suppliers] = await Promise.all([
+  const [customers, services, jobs, invoices, expenses, laundry, equipment, inventory, payments, costCategories, suppliers, depreciationEntries] = await Promise.all([
     pool.query(`SELECT id, name, company, type, phone, email, balance::float8 AS balance, status FROM customers ORDER BY id`),
     pool.query(`SELECT id, name, division, method, price::float8 AS price, active FROM services ORDER BY id`),
     pool.query(`SELECT id, number, customer_id AS "customerId", service_id AS "serviceId",
@@ -51,7 +52,12 @@ export async function getData(): Promise<AppData> {
                 FROM laundry_orders ORDER BY received DESC, id DESC`),
     pool.query(`SELECT id, name, serial_number AS "serialNumber", type, value::float8 AS value,
                        book_value::float8 AS "bookValue", condition, next_maintenance::text AS "nextMaintenance",
-                       usage::float8 AS usage
+                       usage::float8 AS usage, purchase_date::text AS "purchaseDate",
+                       cost::float8 AS cost, salvage_value::float8 AS "salvageValue",
+                       useful_life_months AS "usefulLifeMonths", depreciation_method AS "depreciationMethod",
+                       accumulated_depreciation::float8 AS "accumulatedDepreciation",
+                       disposed_at::text AS "disposedAt",
+                       custodian_employee_id AS "custodianEmployeeId"
                 FROM equipment ORDER BY id`),
     pool.query(`SELECT id, name, category, unit, quantity::float8 AS quantity, minimum::float8 AS minimum,
                        cost::float8 AS cost
@@ -64,6 +70,10 @@ export async function getData(): Promise<AppData> {
     pool.query(`SELECT id, name, gl_account_code AS "glAccountCode", kind FROM cost_categories
                 WHERE deleted_at IS NULL ORDER BY name`),
     pool.query(`SELECT id, name, phone, email, notes FROM suppliers WHERE deleted_at IS NULL ORDER BY name`),
+    pool.query(`SELECT id, equipment_id AS "equipmentId", period, amount::float8 AS amount,
+                       accumulated::float8 AS accumulated, book_value::float8 AS "bookValue",
+                       created_at::text AS "createdAt"
+                FROM asset_depreciation_entries ORDER BY equipment_id, period`),
   ]);
 
   return {
@@ -78,5 +88,6 @@ export async function getData(): Promise<AppData> {
     payments: payments.rows,
     costCategories: costCategories.rows,
     suppliers: suppliers.rows,
+    depreciationEntries: depreciationEntries.rows,
   };
 }

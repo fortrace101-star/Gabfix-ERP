@@ -13,6 +13,9 @@ export type Queryable = Pick<ClientBase, 'query'>;
 const applied = (client: Queryable, id: string) =>
   client.query(`SELECT 1 FROM schema_migrations WHERE id = $1`, [id]).then(({ rows }) => rows.length > 0);
 
+/** Session-level advisory lock so concurrent runners (server boot + tests) serialise. */
+const MIGRATION_LOCK_KEY = 727261;
+
 /**
  * Apply every unapplied file in server/migrations exactly once, in lexicographic
  * order, recording each in schema_migrations. Each file runs inside its own
@@ -26,6 +29,18 @@ const applied = (client: Queryable, id: string) =>
  * Returns the ids of migrations applied during this call.
  */
 export async function migrate(client: Queryable, log: (message: string) => void = console.log): Promise<string[]> {
+  // Two runners (server boot and the test suite, say) can reach the applied()
+  // check at the same moment; the advisory lock serialises them so the second
+  // sees the first's schema_migrations rows instead of racing the INSERT.
+  await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_KEY]);
+  try {
+    return await runMigrations(client, log);
+  } finally {
+    await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY]).catch(() => undefined);
+  }
+}
+
+async function runMigrations(client: Queryable, log: (message: string) => void): Promise<string[]> {
   await client.query(
     `CREATE TABLE IF NOT EXISTS schema_migrations (
        id TEXT PRIMARY KEY,

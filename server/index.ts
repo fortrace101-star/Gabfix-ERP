@@ -11,6 +11,7 @@ import { inventoryRouter } from './routes/inventory';
 import { jobsRouter } from './routes/jobs';
 import { paymentsRouter } from './routes/payments';
 import { costingRouter } from './routes/costing';
+import { assetsRouter } from './routes/assets';
 import { servicesRouter } from './routes/services';
 import { eventsRouter } from './routes/events';
 import { workspaceRouter } from './routes/workspace';
@@ -67,6 +68,7 @@ app.use('/api/jobs', scoped('admin', 'portal', 'laundry'), jobsRouter);
 app.use('/api/payments', scoped('admin', 'laundry', 'store', 'portal'), paymentsRouter);
 app.use('/api', scoped('admin', 'portal'), costingRouter); // /costs, /timesheets (Phase 1c)
 app.use('/api/equipment', scoped('admin', 'laundry'), equipmentRouter);
+app.use('/api/assets', scoped('admin'), assetsRouter); // /:id/depreciate (Phase 1d)
 app.use('/api/expenses', scoped('admin', 'laundry', 'store', 'portal'), expensesRouter);
 app.use('/api/services', scoped('admin', 'laundry', 'store', 'portal'), servicesRouter);
 app.use('/api/inventory', scoped('admin', 'laundry', 'store'), inventoryRouter);

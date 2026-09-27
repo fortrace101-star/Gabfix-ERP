@@ -6,7 +6,7 @@
 | Requirements | [`docs/requirements.md`](../requirements.md) |
 | Baseline commit | `100d0aa` (Pre-refactor baseline snapshot before enhancement work) |
 | Started | 2026-09-25 |
-| Status | Phase 0a complete · Phase 0b complete · Phase 0c complete (identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, client split, SSE, tests+CI) · **Phase 1 in progress** — 1a money spine ✅ · 1b job dates/assignments ✅ · 1c costing ✅; assets (1d) and laundry (1e) next |
+| Status | Phase 0a complete · Phase 0b complete · Phase 0c complete (identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, client split, SSE, tests+CI) · **Phase 1 in progress** — 1a money spine ✅ · 1b job dates/assignments ✅ · 1c costing ✅ · 1d assets/depreciation ✅; laundry (1e) next |
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -29,7 +29,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | Phase 6 | Real-time upgrade | Socket.IO chat, Inbox, presence, live map | — |
 | Phase 7 | Depth | Payment gateway + reconciliation, scheduled reports, dunning | — |
 
-> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 is in progress**: 1a payments + double-entry ledger done and probed live (plan exit criterion "a payment moves invoice status, customer balance, journal and cash flow together" holds atomically); 1b job dates/priority/site/attribution + job_events/job_assignments done. Remaining: costing (1c), assets/depreciation (1d), laundry items/dates (1e).
+> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 is in progress**: 1a payments + double-entry ledger done and probed live (plan exit criterion "a payment moves invoice status, customer balance, journal and cash flow together" holds atomically); 1b job dates/priority/site/attribution + job_events/job_assignments done. 1c costing done — jobs.cost comes from real cost lines (the plan's second Phase-1 exit criterion); 1d asset register with a real depreciation schedule done. Remaining: laundry items/dates (1e).
 
 ---
 
@@ -357,6 +357,29 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 
 ---
 
+### 1d — Asset register: equipment columns, depreciation schedule + postings ✅
+
+| Step | What | Status | Notes |
+| --- | --- | --- | --- |
+| 1d.1 | Migration `011_assets.sql` — equipment gains purchase_date, cost, salvage_value, useful_life_months, depreciation_method (straight-line\|none), accumulated_depreciation, disposed_at, custodian_employee_id; backfill cost = value and purchase_date = 2026-01-01; `asset_depreciation_entries` UNIQUE (equipment_id, period); seeds GL 1400 Equipment at cost, 1500 Accumulated depreciation, 6100 Depreciation expense | [x] | Book value stays the seeded figure until the first posting takes over — same "legacy values visible until the ledger is accepted" rule as jobs.cost |
+| 1d.2 | `services/assets.ts` — `depreciateAsset(InTx)`: straight-line month = min(remaining, (cost − salvage)/life); the schedule continues from MAX(period) or the purchase month; debits 6100 / credits 1500 through `postJournalEntry`; updates accumulated_depreciation + book_value with the schedule row | [x] | FOR UPDATE row lock + the unique (equipment_id, period) index keep a period un-double-postable; refuses disposed, method 'none', no useful life, fully depreciated |
+| 1d.3 | `routes/assets.ts` POST `/api/assets/:id/depreciate` (admin scope), broadcasts `equipment-updated`; `equipmentResource` create/patch/columns extended with the asset fields (accumulated_depreciation stays schedule-owned, not PATCHable) | [x] | New SSE type `asset-depreciated` registered server- and client-side for the Phase 1 UI slice |
+| 1d.4 | Read layer: `/api/data` equipment select widened with the register fields; new `depreciationEntries` key | [x] | `asset_depreciation_entries` added to TRUNCATE_TABLES so /api/reset stays clean |
+| 1d.5 | Tests: 3 new (`nextPeriod` calendar walk, asset-field schema, DB integration: 100000/month schedule from purchase month, balanced 1500/6100 journal, compounding periods, unique-period probe via savepoint, 40-month run to exact salvage value, disposed refusal, cascade cleanup) — suite now 35/35 | [x] | Integration rolls back like the other suites |
+| 1d.6 | `migrate()` now serialises runners with a session-level advisory lock | [x] | The two DB-gated test files raced at module load (duplicate schema_migrations key) — generalised the fix into the runner rather than the tests |
+
+### 1d Verification matrix
+
+| Check | Result |
+| --- | --- |
+| `011_assets.sql` applied on the dev DB | ✅ at server boot; backfill verified (a1: cost 10,000,000, purchase 2026-01-01, method straight-line) |
+| Server typecheck | ✅ 0 errors |
+| Server tests | ✅ 35/35 (was 32; +3 assets) |
+| Live end-to-end probe (booted stack) | ✅ depreciate without useful life → 400; PATCH usefulLife 60/salvage 1,000,000 → two postings of 150,000 (JNL-00004/5), accumulated 300,000, book_value 9,700,000; schedule rows in `/api/data` |
+| Stack shutdown | ✅ all 5 ports free after taskkill |
+
+---
+
 ### 1a Verification matrix
 
 | Check | Result |
@@ -381,7 +404,7 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 | 0a. Multi-app scaffold | 4 apps (admin + 3 new) + root scripts + per-app configs + ports | 2–3 d | [x] |
 | 0b. Theme, components & PWA shells | Vendored tokens + useTheme + StatusBadge + PWA manifests | 1–2 d | [x] |
 | 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; branches removed; §0.9/§0.10/§0.11/§0.12 all done | 3–5 d | [x] |
-| 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [~] — 1a payments+ledger, 1b job dates, 1c costing done |
+| 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [~] — 1a payments+ledger, 1b job dates, 1c costing, 1d assets/depreciation done |
 | 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [ ] |
 | 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [ ] |
 | 4. Field operations | Employees, devices, assignments, `/field` beacon, live map, geofences | 8–12 d | [ ] |
@@ -428,6 +451,7 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 | 2026-09-27 | Phase 0c.2c done (§0.10) — **Phase 0c complete**: admin client split into `app/` (store.tsx react-query context, realtime.ts SSE hook, layout/Sidebar+Topbar), `features/` (9 views incl. modals), `lib/` (money, csv, format, profile), `components/ui.tsx`; react-router-dom deep links + @tanstack/react-query cache; `App.tsx` 641 → 92 lines; lint baseline 20 → 0 errors. Verified: typecheck 0, build + PWA green, 9 deep links 200 on the live server, root typecheck 0, server tests 17/17 |
 | 2026-09-27 | Dev-env fix — admin "ENOENT react/index.js while updating dependencies": root cause was an accidental npm **workspaces** install at the repo root (root `package-lock.json` created during 0c.2c), which hoisted all app deps to `node_modules/` while vite's per-app optimizer and the per-app locks expected standalone installs; the stale admin lock (missing react-router-dom/@tanstack/react-query) then reconciled `node_modules` down and deleted react itself. Fix: removed `workspaces` from root `package.json`, deleted root `package-lock.json`/`node_modules`, clean `npm install` per app dir (matching CI's per-app `npm ci`). Verified: all 4 apps have react locally, stack boots with 0 errors in the log, admin modules transform 200, ports freed |
 | 2026-09-27 | Phase 1c done — job costing: `010_costing.sql` (suppliers, cost_categories with GL links, job_costs, timesheets; partial unique index makes a timesheet un-double-costable), `services/costing.ts` (cost-line insert + jobs.cost recompute once lines exist — the plan's "job cost comes from real cost lines" exit criterion; timesheet approval derives minutes and posts the labour line idempotently), `/api/costs` + `/api/timesheets(/:id/approve)` routes (admin+portal, job-updated SSE), `costCategories`+`suppliers` in /api/data. Tests 28 → 32. Verified: typecheck 0, migrate clean, estimate→lines flip and idempotent re-approval probed in-test |
+| 2026-09-27 | Phase 1d done — asset register: `011_assets.sql` (equipment gains purchase/cost/salvage/useful-life/method/accumulated/disposal/custodian columns + backfill; `asset_depreciation_entries` unique per asset per period; GL 1400/1500/6100 seeded), `services/assets.ts` (straight-line posting debits depreciation expense and credits accumulated depreciation through the ledger; book value = cost − accumulated), POST `/api/assets/:id/depreciate` (admin, equipment-updated SSE), register fields in `/api/data` (+ `depreciationEntries`). `migrate()` gained a session advisory lock after the concurrent-test race. Tests 32 → 35. Verified: typecheck 0, live probe — a1 two 150,000 postings (JNL-00004/5), book value 9,700,000, schedule in /api/data |
 | 2026-09-27 | Phase 1b done — job dates & assignments: `009_jobs_dates.sql` adds job lifecycle dates (scheduled/quote/promised), instants (started/completed/invoiced/paid — server-managed), salesperson/manager attribution, site address + coordinates, priority; `job_events` + `job_assignments` tables; legacy `date` backfilled everywhere. jobsResource create/patch extended; `/api/data` jobs select widened. Tests 23 → 28. Verified: typecheck 0, migrate clean on dev DB, backfill + cascade probed in-test |
 | 2026-09-27 | Phase 1a done — money spine: `008_money.sql` (chart_of_accounts, payment_methods, payments, journal_entries/lines, PAY/JNL sequence defence), `services/ledger.ts` (balanced postJournalEntry), `services/payments.ts` (createPaymentInTx: PAY numbering + journal + invoice/laundry/customer balance recompute in one transaction), `routes/payments.ts` + `/api/payments` mount, `payments` key in `/api/data`, `payment-created` SSE, money tables added to TRUNCATE set. Verified: server typecheck 0, tests 23/23 (integration tests rollback-clean), live probe: PAY-00003/JNL-00003 balanced, invoice i1 Partially Paid, c2 balance 3,000,000 |
 
