@@ -72,6 +72,16 @@ export async function seedData(client: ClientBase) {
      ON CONFLICT (id) DO NOTHING`
   );
 
+  // Replicate the 009 backfill so /api/reset matches a migrated database:
+  // the migration only ran once on the pre-existing data, but the seed runs
+  // on every reset. Same idempotent WHERE-IS-NULL rule as 009.
+  await client.query(`UPDATE jobs SET scheduled_date = date WHERE scheduled_date IS NULL`);
+  await client.query(`UPDATE jobs SET quote_date = date WHERE status = 'Quoted' AND quote_date IS NULL`);
+  await client.query(`UPDATE jobs SET started_at = date::timestamptz + interval '9 hours'
+    WHERE status IN ('Completed', 'In Progress') AND started_at IS NULL`);
+  await client.query(`UPDATE jobs SET completed_at = date::timestamptz + interval '17 hours'
+    WHERE status = 'Completed' AND completed_at IS NULL`);
+
   await client.query(
     `INSERT INTO invoices (id, number, customer_id, date, due, total, paid, status) VALUES
       ('i1', 'INV-00098', 'c2', '2026-08-30', '2026-09-06', 3250000, 2000000, 'Partially Paid'),
@@ -103,12 +113,13 @@ export async function seedData(client: ClientBase) {
   );
 
   await client.query(
-    `INSERT INTO equipment (id, name, serial_number, type, value, book_value, condition, next_maintenance, usage) VALUES
-      ('a1', 'Industrial Washer WM-003', 'WM-2021-001', 'Washing machine', 10000000, 8500000, 'Good', '2026-09-10', 384),
-      ('a2', 'Commercial Dryer DR-002', 'DR-2022-014', 'Dryer', 7600000, 6200000, 'Good', '2026-09-18', 292),
-      ('a3', 'Toyota Hiace UBD 442K', 'UBD-442K', 'Vehicle', 48000000, 35600000, 'Good', '2026-09-06', 12840),
-      ('a4', 'Karcher Pressure Washer', 'KPW-339-X', 'Pressure washer', 4200000, 3400000, 'Maintenance due', '2026-09-03', 118),
-      ('a5', 'Industrial Ironing Press', 'IIP-880', 'Ironing machine', 5300000, 4900000, 'Good', '2026-10-01', 164)
+    `INSERT INTO equipment (id, name, serial_number, type, value, book_value, condition, next_maintenance, usage,
+                            purchase_date, cost, salvage_value, useful_life_months, depreciation_method) VALUES
+      ('a1', 'Industrial Washer WM-003', 'WM-2021-001', 'Washing machine', 10000000, 8500000, 'Good', '2026-09-10', 384,  '2026-01-01', 10000000, 1000000, 60, 'straight-line'),
+      ('a2', 'Commercial Dryer DR-002',  'DR-2022-014', 'Dryer',           7600000,  6200000, 'Good', '2026-09-18', 292,  '2026-01-01',  7600000,  760000, 60, 'straight-line'),
+      ('a3', 'Toyota Hiace UBD 442K',    'UBD-442K',    'Vehicle',        48000000, 35600000, 'Good', '2026-09-06', 12840, '2026-01-01', 48000000, 4800000, 96, 'straight-line'),
+      ('a4', 'Karcher Pressure Washer',  'KPW-339-X',   'Pressure washer',  4200000,  3400000, 'Maintenance due', '2026-09-03', 118, '2026-01-01',  4200000,  420000, 48, 'straight-line'),
+      ('a5', 'Industrial Ironing Press', 'IIP-880',     'Ironing machine',  5300000,  4900000, 'Good', '2026-10-01', 164,  '2026-01-01',  5300000,  530000, 60, 'straight-line')
      ON CONFLICT (id) DO NOTHING`
   );
 
