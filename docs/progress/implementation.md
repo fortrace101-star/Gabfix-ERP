@@ -6,7 +6,7 @@
 | Requirements | [`docs/requirements.md`](../requirements.md) |
 | Baseline commit | `100d0aa` (Pre-refactor baseline snapshot before enhancement work) |
 | Started | 2026-09-25 |
-| Status | Phase 0a complete · Phase 0b complete · Phase 0c complete (identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, client split, SSE, tests+CI) · **Phase 1 in progress** — 1a money spine done (payments, ledger, numbering); costing, job/laundry dates, assets next |
+| Status | Phase 0a complete · Phase 0b complete · Phase 0c complete (identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, client split, SSE, tests+CI) · **Phase 1 in progress** — 1a money spine done (payments, ledger, numbering) · 1b job dates/assignments done; costing, assets, laundry next |
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -21,7 +21,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | Phase 0a | Multi-app scaffold | Rename `client/` → `gabfix-administrator`; scaffold 3 new Vite+React 18 apps; per-app configs; root dev scripts; ports 5173–5176 | ✅ done |
 | **Phase 0b** | **Theme, components & PWA shells** | **Vendored theme tokens; `useTheme` hook; `StatusBadge` component; PWA manifests + sw; `.env` with `VITE_APP_ID`** | **✅ done** |
 | Phase 0c | Backend multi-app wiring | `005_multiapp_identity` + `006_remove_branches` + `sync_tables` migrations; server identity/roles scoped to 4 apps; §0.9 dates, §0.10 client split, §0.11 SSE, §0.12 CI completion | ✅ done — 0c.1 + 0c.2a/b/c/d/e complete |
-| Phase 1 | Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | [~] — 1a payments + ledger done |
+| Phase 1 | Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | [~] — 1a payments+ledger, 1b job dates/assignments done |
 | Phase 2 | PDF & documents | jsPDF + AutoTable, 14 document types, print/download/attach | — |
 | Phase 3 | Notifications, feedback, real-time | WhatsApp/SMS, completion message, feedback form, SSE | — |
 | Phase 4 | Field operations | Employees, devices, assignments, beacon, map, geofences | — |
@@ -29,7 +29,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | Phase 6 | Real-time upgrade | Socket.IO chat, Inbox, presence, live map | — |
 | Phase 7 | Depth | Payment gateway + reconciliation, scheduled reports, dunning | — |
 
-> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 is in progress**: 1a payments + double-entry ledger done and probed live (plan exit criterion "a payment moves invoice status, customer balance, journal and cash flow together" holds atomically); remaining slices: job/laundry dates & assignments, costing, assets, engagement, telemetry.
+> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 is in progress**: 1a payments + double-entry ledger done and probed live (plan exit criterion "a payment moves invoice status, customer balance, journal and cash flow together" holds atomically); 1b job dates/priority/site/attribution + job_events/job_assignments done. Remaining: costing (1c), assets/depreciation (1d), laundry items/dates (1e).
 
 ---
 
@@ -307,6 +307,29 @@ Migration `008_money.sql` (plan's "005_money", renumbered to the next free file)
 | 1a.6 | Reset/import safety: `journal_lines`/`journal_entries`/`payments` added to `TRUNCATE_TABLES` (payments reference invoices/customers/laundry_orders/jobs, so CASCADE alone would orphan money rows on reset) | [x] | Import order: paymentsResource not yet in `RESOURCES` — payment restore from backups arrives with the finance UI slice |
 | 1a.7 | Tests: 6 new (payment schema 422s incl. zero/negative amounts, unknown-field rejection, ledger invariant enforced pre-write, transactional payment integration, rollback on unknown method) — suite now 23/23 | [x] | Integration tests run against the real DB and **roll back instead of committing**, so dev/CI databases keep no fixtures (an earlier committed-fixture leak was found via the live probe and fixed); DB unreachable → integration tests skip with a warning |
 
+### 1b — Job dates, priority, site, attribution, events and assignments ✅
+
+Migration `009_jobs_dates.sql` (plan's "004_jobs_dates_assignments", renumbered, branchless): splits the job lifecycle into day-level dates (`scheduled_date`, `quote_date`, `promised_at`) and instant timestamps (`started_at`, `completed_at`, `invoiced_at`, `paid_at`), adds commercial attribution (`salesperson_id`, `manager_id`), the work site (`site_address`, `lat`, `lng`), `priority` (Low/Normal/High/Urgent), plus `job_events` (append-only lifecycle log) and `job_assignments` (per-employee, role, accepted/completed instants). The legacy `date` column stays — it is the execution day the UI edits today.
+
+| Step | Work | Status | Notes |
+| --- | --- | --- | --- |
+| 1b.1 | Migration `009_jobs_dates.sql` + backfill: `scheduled_date = date` everywhere; `quote_date` for Quoted jobs; started/completed instants pinned to the legacy day (09:00/17:00) for Completed/In Progress work | [x] | Additive, re-runnable (`ADD COLUMN IF NOT EXISTS`); `invoiced_at`/`paid_at` stay null — jobs carry no invoice link historically |
+| 1b.2 | `jobsResource` create/patch/columns extended (dates, priority, salesperson, manager, site, lat/lng); lifecycle timestamps deliberately **not** client-writable — they move when status endpoints land | [x] | Strict schemas reject `startedAt` with 422 (tested) instead of silently dropping |
+| 1b.3 | Read layer: `/api/data` jobs select gains the new columns (snake→camel aliased, lat/lng as float8) | [x] | Extra fields are additive to the client payload; admin types pick them up with the Phase 1 UI slice |
+| 1b.4 | Tests: 5 new (create accepts new fields incl. numeric-string coords; legacy-only create still valid; bad priority/date rejected; patch accepts new fields but rejects lifecycle timestamps; DB integration: backfill completeness, assignments/events insert + cascade) — suite now 28/28 | [x] | Integration test rolls back; fixtures never commit |
+
+### 1b Verification matrix
+
+| Check | Result |
+| --- | --- |
+| `npm run db:migrate` applies 009 | ✅ applied cleanly on the dev DB |
+| Server typecheck | ✅ 0 errors |
+| Server tests | ✅ 28/28 (was 23; +5 jobs-dates) |
+| Backfill probe (in-test) | ✅ zero jobs with null `scheduled_date`; zero Completed jobs without `completed_at` |
+| Cascade behaviour | ✅ deleting a job removes its assignments and events |
+
+---
+
 ### 1a Verification matrix
 
 | Check | Result |
@@ -331,7 +354,7 @@ Migration `008_money.sql` (plan's "005_money", renumbered to the next free file)
 | 0a. Multi-app scaffold | 4 apps (admin + 3 new) + root scripts + per-app configs + ports | 2–3 d | [x] |
 | 0b. Theme, components & PWA shells | Vendored tokens + useTheme + StatusBadge + PWA manifests | 1–2 d | [x] |
 | 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; branches removed; §0.9/§0.10/§0.11/§0.12 all done | 3–5 d | [x] |
-| 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [~] — 1a payments + ledger done |
+| 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [~] — 1a payments+ledger, 1b job dates/assignments done |
 | 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [ ] |
 | 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [ ] |
 | 4. Field operations | Employees, devices, assignments, `/field` beacon, live map, geofences | 8–12 d | [ ] |
@@ -377,6 +400,7 @@ Migration `008_money.sql` (plan's "005_money", renumbered to the next free file)
 | 2026-09-27 | Smoke test of the full stack after the port move: all 4 apps served their titles on 5173–5176, `/api/health` green through the 5173 proxy, SSE streamed through the proxy, `scripts/dev.mjs` shutdown freed every port. Also cleared two duplicate nodemon→tsx chains that were fighting over :5000 |
 | 2026-09-27 | Phase 0c.2c done (§0.10) — **Phase 0c complete**: admin client split into `app/` (store.tsx react-query context, realtime.ts SSE hook, layout/Sidebar+Topbar), `features/` (9 views incl. modals), `lib/` (money, csv, format, profile), `components/ui.tsx`; react-router-dom deep links + @tanstack/react-query cache; `App.tsx` 641 → 92 lines; lint baseline 20 → 0 errors. Verified: typecheck 0, build + PWA green, 9 deep links 200 on the live server, root typecheck 0, server tests 17/17 |
 | 2026-09-27 | Dev-env fix — admin "ENOENT react/index.js while updating dependencies": root cause was an accidental npm **workspaces** install at the repo root (root `package-lock.json` created during 0c.2c), which hoisted all app deps to `node_modules/` while vite's per-app optimizer and the per-app locks expected standalone installs; the stale admin lock (missing react-router-dom/@tanstack/react-query) then reconciled `node_modules` down and deleted react itself. Fix: removed `workspaces` from root `package.json`, deleted root `package-lock.json`/`node_modules`, clean `npm install` per app dir (matching CI's per-app `npm ci`). Verified: all 4 apps have react locally, stack boots with 0 errors in the log, admin modules transform 200, ports freed |
+| 2026-09-27 | Phase 1b done — job dates & assignments: `009_jobs_dates.sql` adds job lifecycle dates (scheduled/quote/promised), instants (started/completed/invoiced/paid — server-managed), salesperson/manager attribution, site address + coordinates, priority; `job_events` + `job_assignments` tables; legacy `date` backfilled everywhere. jobsResource create/patch extended; `/api/data` jobs select widened. Tests 23 → 28. Verified: typecheck 0, migrate clean on dev DB, backfill + cascade probed in-test |
 | 2026-09-27 | Phase 1a done — money spine: `008_money.sql` (chart_of_accounts, payment_methods, payments, journal_entries/lines, PAY/JNL sequence defence), `services/ledger.ts` (balanced postJournalEntry), `services/payments.ts` (createPaymentInTx: PAY numbering + journal + invoice/laundry/customer balance recompute in one transaction), `routes/payments.ts` + `/api/payments` mount, `payments` key in `/api/data`, `payment-created` SSE, money tables added to TRUNCATE set. Verified: server typecheck 0, tests 23/23 (integration tests rollback-clean), live probe: PAY-00003/JNL-00003 balanced, invoice i1 Partially Paid, c2 balance 3,000,000 |
 
 

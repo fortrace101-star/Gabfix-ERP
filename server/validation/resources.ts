@@ -44,9 +44,12 @@ export type Resource = {
 /** Columns stored as JSONB must be stringified before reaching the pg driver. */
 export const JSONB_COLUMNS: ReadonlySet<string> = new Set(['equipment_usage']);
 
-/** Job lifecycle values used by the client (types.ts) and the seed data. */
+/** Job status values used by the client (types.ts) and the seed data. */
 export const JOB_STATUSES = ['Scheduled', 'In Progress', 'Completed', 'Quoted', 'Cancelled'] as const;
 const jobStatus = z.enum(JOB_STATUSES);
+
+/** Job priority ladder (009_jobs_dates). Default 'Normal'. */
+export const JOB_PRIORITIES = ['Low', 'Normal', 'High', 'Urgent'] as const;
 
 /** A PATCH must change something; an empty body is a validation failure. */
 const atLeastOneField = <T extends z.ZodType>(schema: T) =>
@@ -116,11 +119,22 @@ const jobCreate = z.strictObject({
   customerId: idText,
   serviceId: idText,
   date: dateText,
+  // Lifecycle dates (009): legacy `date` stays the execution day.
+  scheduledDate: optionalDateText,
+  quoteDate: optionalDateText,
+  promisedAt: optionalDateText,
   status: jobStatus.optional(),
+  priority: z.enum(JOB_PRIORITIES).optional(),
   revenue: money,
   cost: optionalMoney,
   assignees: optionalTextList,
   equipmentUsage: optionalEquipmentUsage,
+  // Commercial attribution and the work site.
+  salespersonId: idText.optional(),
+  managerId: idText.optional(),
+  siteAddress: optionalText.optional(),
+  lat: optionalMoney,
+  lng: optionalMoney,
 });
 
 export const jobsResource: Resource = {
@@ -132,15 +146,26 @@ export const jobsResource: Resource = {
     customerId: 'customer_id',
     serviceId: 'service_id',
     date: 'date',
+    scheduledDate: 'scheduled_date',
+    quoteDate: 'quote_date',
+    promisedAt: 'promised_at',
     status: 'status',
+    priority: 'priority',
     revenue: 'revenue',
     cost: 'cost',
     assignees: 'assignees',
     equipmentUsage: 'equipment_usage',
+    salespersonId: 'salesperson_id',
+    managerId: 'manager_id',
+    siteAddress: 'site_address',
+    lat: 'lat',
+    lng: 'lng',
   },
   jsonColumns: JSONB_COLUMNS,
   create: jobCreate,
-  // The job status modal patches status plus equipment hours.
+  // The job status modal patches status plus equipment hours; the lifecycle
+  // timestamps (started_at, completed_at, ...) are deliberately not writable
+  // here — they move when status endpoints land.
   patch: atLeastOneField(
     z.strictObject({
       status: jobStatus.optional(),
@@ -149,6 +174,15 @@ export const jobsResource: Resource = {
       revenue: optionalMoney,
       cost: optionalMoney,
       date: optionalDateText,
+      scheduledDate: optionalDateText,
+      quoteDate: optionalDateText,
+      promisedAt: optionalDateText,
+      priority: z.enum(JOB_PRIORITIES).optional(),
+      salespersonId: idText.optional(),
+      managerId: idText.optional(),
+      siteAddress: optionalText.optional(),
+      lat: optionalMoney,
+      lng: optionalMoney,
     }),
   ),
   row: importRow(jobCreate),

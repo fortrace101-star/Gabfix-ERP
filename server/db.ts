@@ -31,8 +31,12 @@ export async function getData(): Promise<AppData> {
     pool.query(`SELECT id, name, company, type, phone, email, balance::float8 AS balance, status FROM customers ORDER BY id`),
     pool.query(`SELECT id, name, division, method, price::float8 AS price, active FROM services ORDER BY id`),
     pool.query(`SELECT id, number, customer_id AS "customerId", service_id AS "serviceId",
-                       date::text AS date, status, revenue::float8 AS revenue, cost::float8 AS cost,
-                       assignees, equipment_usage AS "equipmentUsage"
+                       date::text AS date, scheduled_date::text AS "scheduledDate",
+                       quote_date::text AS "quoteDate", promised_at::text AS "promisedAt",
+                       status, priority, revenue::float8 AS revenue, cost::float8 AS cost,
+                       assignees, equipment_usage AS "equipmentUsage",
+                       salesperson_id AS "salespersonId", manager_id AS "managerId",
+                       site_address AS "siteAddress", lat::float8 AS lat, lng::float8 AS lng
                 FROM jobs ORDER BY date DESC, id DESC`),
     pool.query(`SELECT id, number, customer_id AS "customerId", date::text AS date, due::text AS due,
                        total::float8 AS total, paid::float8 AS paid, status
