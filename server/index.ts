@@ -13,6 +13,7 @@ import { paymentsRouter } from './routes/payments';
 import { costingRouter } from './routes/costing';
 import { assetsRouter } from './routes/assets';
 import { laundryRouter } from './routes/laundry';
+import { documentsRouter } from './routes/documents';
 import { servicesRouter } from './routes/services';
 import { eventsRouter } from './routes/events';
 import { workspaceRouter } from './routes/workspace';
@@ -71,6 +72,7 @@ app.use('/api', scoped('admin', 'portal'), costingRouter); // /costs, /timesheet
 app.use('/api/equipment', scoped('admin', 'laundry'), equipmentRouter);
 app.use('/api/assets', scoped('admin'), assetsRouter); // /:id/depreciate (Phase 1d)
 app.use('/api/laundry', scoped('admin', 'laundry', 'store', 'portal'), laundryRouter); // intake + status (Phase 1e)
+app.use('/api/documents', scoped('admin', 'laundry', 'store', 'portal'), documentsRouter); // :type/:id.pdf (Phase 2)
 app.use('/api/expenses', scoped('admin', 'laundry', 'store', 'portal'), expensesRouter);
 app.use('/api/services', scoped('admin', 'laundry', 'store', 'portal'), servicesRouter);
 app.use('/api/inventory', scoped('admin', 'laundry', 'store'), inventoryRouter);

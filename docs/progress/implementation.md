@@ -6,7 +6,7 @@
 | Requirements | [`docs/requirements.md`](../requirements.md) |
 | Baseline commit | `100d0aa` (Pre-refactor baseline snapshot before enhancement work) |
 | Started | 2026-09-25 |
-| Status | Phase 0a complete · Phase 0b complete · Phase 0c complete (identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, client split, SSE, tests+CI) · **Phase 1 complete** — 1a money spine ✅ · 1b job dates/assignments ✅ · 1c costing ✅ · 1d assets/depreciation ✅ · 1e laundry logistics ✅ |
+| Status | Phase 0a complete · Phase 0b complete · Phase 0c complete (identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, client split, SSE, tests+CI) · **Phase 1 complete** — 1a money spine ✅ · 1b job dates/assignments ✅ · 1c costing ✅ · 1d assets/depreciation ✅ · 1e laundry logistics ✅ · **Phase 2 in progress** — 2a pdfkit service + core documents ✅ |
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -29,7 +29,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | Phase 6 | Real-time upgrade | Socket.IO chat, Inbox, presence, live map | — |
 | Phase 7 | Depth | Payment gateway + reconciliation, scheduled reports, dunning | — |
 
-> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 is complete**: 1a payments + double-entry ledger probed live ("a payment moves invoice status, customer balance, journal and cash flow together"); 1b job dates/priority/site/attribution + job_events/job_assignments; 1c costing ("job cost comes from real cost lines"); 1d asset register with a real depreciation schedule probed live; 1e laundry intake + status timeline with priced line items probed live. Both Phase-1 exit criteria hold. Next: Phase 2 (PDF and documents).
+> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 is complete**: 1a payments + double-entry ledger probed live ("a payment moves invoice status, customer balance, journal and cash flow together"); 1b job dates/priority/site/attribution + job_events/job_assignments; 1c costing ("job cost comes from real cost lines"); 1d asset register with a real depreciation schedule probed live; 1e laundry intake + status timeline with priced line items probed live. Both Phase-1 exit criteria hold. **Phase 2 is in progress**: 2a pdfkit service + layout kit + invoice/receipt/laundry-ticket/job-card downloads done and probed live; 8 document types remain (several gated on later-phase data), then client PDF buttons and Inter font embedding.
 
 ---
 
@@ -432,6 +432,33 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 
 ---
 
+## Phase 2 — PDF and documents (in progress)
+
+### 2a — pdfkit service, layout kit, core documents, download route ✅
+
+| Step | What | Status | Notes |
+| --- | --- | --- | --- |
+| 2a.1 | `pdfkit@0.20.2` + `@types/pdfkit` installed in server (in-directory install per env quirk); pure-JS deps, Node 22 compatible as the plan verified | [x] | |
+| 2a.2 | `services/pdf/layout.ts` — shared layout kit: pageHeader (brand block + title + reference + rule), metaGrid (3-per-row label/value), itemsTable (dark header band, alternating shading, right-aligned money, emphasis rows), totalsBlock, "Page N of M" footers via bufferedPageRange; `sanitize()` strips non-WinAnsi glyphs so standard fonts never lose a byte | [x] | Inter TTF embedding deferred to a later slice; sanitize keeps output valid in the meantime |
+| 2a.3 | `services/pdf/documents.ts` — registry of loaders: invoice (customer + totals + balance), receipt (method + reference + applied-to), laundry ticket (items from laundry_order_items, weight/pieces, timeline), job card (cost lines + crew + margin); each renders and mirrors into DOCUMENT_STORAGE_DIR (default ./storage/documents, mirror failure never blocks the download); filenames are the document number | [x] | Loaders take an optional client (InTx pattern) so tests render inside their transaction |
+| 2a.4 | `routes/documents.ts` — GET /api/documents/:type/:id.pdf mounted for all four scopes; Content-Type application/pdf, Content-Disposition attachment with the numbered filename; 404 for unknown type and unknown id | [x] | |
+| 2a.5 | Tests: 3 new (valid PDF structure: %PDF magic, page object, %%EOF; sanitize survives en-dash/middle-dot input; integration renders all four types from a rolled-back fixture and nulls on unknown ids) — suite now 41/41 | [x] | |
+
+### 2a Verification matrix
+
+| Check | Result |
+| --- | --- |
+| Server typecheck | ✅ 0 errors |
+| Server tests | ✅ 41/41 (was 38; +3 pdf) |
+| Live download probes | ✅ /api/documents/invoice/i1.pdf → 2,916 bytes, `attachment; filename="INV-00098.pdf"`; laundry l1.pdf → 2,815 bytes; both start %PDF-1.3 |
+| Unknown type / id | ✅ 404 with clear JSON errors |
+| Storage mirror | ✅ INV-00098.pdf, LDY-00216.pdf etc. land in server/storage/documents/; directory gitignored |
+| Stack shutdown | ✅ all 5 ports free |
+
+Remaining in Phase 2 (plan §12): statement, manifest, delivery note, P&L, balance sheet, aging, asset register, trip report (8 more types, several gated on later-phase data), client PDF buttons, Inter font embedding.
+
+---
+
 ## Later phases (summary — see plan §18.1)
 
 | Phase | Goal | Estimate | Status |
@@ -440,7 +467,7 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 | 0b. Theme, components & PWA shells | Vendored tokens + useTheme + StatusBadge + PWA manifests | 1–2 d | [x] |
 | 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; branches removed; §0.9/§0.10/§0.11/§0.12 all done | 3–5 d | [x] |
 | 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [x] — 1a payments+ledger, 1b job dates, 1c costing, 1d assets/depreciation, 1e laundry logistics |
-| 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [ ] |
+| 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [~] — 2a pdfkit service + layout kit + invoice/receipt/laundry/job-card downloads done |
 | 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [ ] |
 | 4. Field operations | Employees, devices, assignments, `/field` beacon, live map, geofences | 8–12 d | [ ] |
 | 5. Sales and manager dashboard | Attribution, pipeline, commissions, role-scoped dashboards | 6–9 d | [ ] |
@@ -490,6 +517,7 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 | 2026-09-27 | Phase 1e done — laundry logistics: `012_logistics.sql` (laundry_orders gains promised/ready/collected + job link + weight/pieces with backfill; `laundry_order_items` priced lines; branchless per decision #9), `services/laundry.ts` (priced intake claiming LDY numbers transactionally; status moves stamp ready/collected server-side, stamps never clear), POST `/api/laundry` + PATCH `/api/laundry/:id/status` (all four scopes, laundry-updated SSE — first laundry write path), logistics fields + `laundryItems` in /api/data. Tests 35 → 38. Verified: typecheck 0, live probe — LDY-00219 two-line 70000 intake, stage stamps on Ready/Collected, forged stamps 422. **Phase 1 complete — both plan exit criteria hold** |
 | 2026-09-27 | /api/reset drift fixed: the seed now replicates the 009/011/012 backfill rules (jobs scheduled/completed dates, equipment cost+useful life, laundry stamps) so reset matches a migrated database; depreciation worked again post-reset |
 | 2026-09-27 | Admin UI wired to the Phase 1 spine: laundry intake + status modals (closing the client half of plan issue #11), order timeline + weight/pieces in the table, Depreciate button on asset cards, AppData types extended with the Phase 1 keys, laundry-updated SSE; admin typecheck 0 + build green, UI-shaped payloads probed live |
+| 2026-09-27 | Phase 2a done — PDF documents: `pdfkit` + `services/pdf/layout.ts` (shared layout kit: header/meta/table/totals/footers, WinAnsi-safe sanitize), `services/pdf/documents.ts` (loaders for invoice, receipt, laundry ticket, job card; DOCUMENT_STORAGE_DIR mirroring with numbered filenames), GET `/api/documents/:type/:id.pdf` (all scopes, attachment disposition). Tests 38 → 41. Verified: typecheck 0, live probes — INV-00098.pdf 2,916 bytes / LDY-00216 ticket, 404s for unknown type+id, mirror populated |
 | 2026-09-27 | Phase 1b done — job dates & assignments: `009_jobs_dates.sql` adds job lifecycle dates (scheduled/quote/promised), instants (started/completed/invoiced/paid — server-managed), salesperson/manager attribution, site address + coordinates, priority; `job_events` + `job_assignments` tables; legacy `date` backfilled everywhere. jobsResource create/patch extended; `/api/data` jobs select widened. Tests 23 → 28. Verified: typecheck 0, migrate clean on dev DB, backfill + cascade probed in-test |
 | 2026-09-27 | Phase 1a done — money spine: `008_money.sql` (chart_of_accounts, payment_methods, payments, journal_entries/lines, PAY/JNL sequence defence), `services/ledger.ts` (balanced postJournalEntry), `services/payments.ts` (createPaymentInTx: PAY numbering + journal + invoice/laundry/customer balance recompute in one transaction), `routes/payments.ts` + `/api/payments` mount, `payments` key in `/api/data`, `payment-created` SSE, money tables added to TRUNCATE set. Verified: server typecheck 0, tests 23/23 (integration tests rollback-clean), live probe: PAY-00003/JNL-00003 balanced, invoice i1 Partially Paid, c2 balance 3,000,000 |
 

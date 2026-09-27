@@ -24,3 +24,4 @@ dist-ssr
 
 # Vite 5/6 temp config artifacts
 *.timestamp-*.mjs
+server/storage/
