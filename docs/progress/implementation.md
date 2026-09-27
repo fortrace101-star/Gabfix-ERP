@@ -29,7 +29,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | Phase 6 | Real-time upgrade | Socket.IO chat, Inbox, presence, live map | — |
 | Phase 7 | Depth | Payment gateway + reconciliation, scheduled reports, dunning | — |
 
-> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 is complete**: 1a payments + double-entry ledger probed live ("a payment moves invoice status, customer balance, journal and cash flow together"); 1b job dates/priority/site/attribution + job_events/job_assignments; 1c costing ("job cost comes from real cost lines"); 1d asset register with a real depreciation schedule probed live; 1e laundry intake + status timeline with priced line items probed live. Both Phase-1 exit criteria hold. **Phase 2 is in progress**: 2a pdfkit service + layout kit + invoice/receipt/laundry-ticket/job-card downloads done and probed live; 8 document types remain (several gated on later-phase data), then client PDF buttons and Inter font embedding.
+> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 is complete**: 1a payments + double-entry ledger probed live ("a payment moves invoice status, customer balance, journal and cash flow together"); 1b job dates/priority/site/attribution + job_events/job_assignments; 1c costing ("job cost comes from real cost lines"); 1d asset register with a real depreciation schedule probed live; 1e laundry intake + status timeline with priced line items probed live. Both Phase-1 exit criteria hold. **Phase 2 is in progress**: 2a pdfkit service + layout kit + invoice/receipt/laundry-ticket/job-card downloads probed live; 2b statement/AR-aging/P&L/asset-register reports probed live. 8 of 12 document types done; remaining: manifest, delivery note, balance sheet, trip report (gated on later-phase data), client PDF buttons and Inter font embedding.
 
 ---
 
@@ -455,7 +455,25 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 | Storage mirror | ✅ INV-00098.pdf, LDY-00216.pdf etc. land in server/storage/documents/; directory gitignored |
 | Stack shutdown | ✅ all 5 ports free |
 
-Remaining in Phase 2 (plan §12): statement, manifest, delivery note, P&L, balance sheet, aging, asset register, trip report (8 more types, several gated on later-phase data), client PDF buttons, Inter font embedding.
+### 2b — Range and register reports ✅
+
+| Step | What | Status | Notes |
+| --- | --- | --- | --- |
+| 2b.1 | `services/pdf/shared.ts` — brand block + storage mirror extracted from documents.ts (one definition for all twelve types) | [x] | |
+| 2b.2 | `services/pdf/reports.ts` — customer statement (all invoices + balance), AR aging (due-date buckets Current/30/60/90/90+), P&L from journal lines (income by net credit, expense by net debit, from/to range), asset register + depreciation schedule (per-asset posted entries) | [x] | The money spine pays off: P&L reads journal_lines grouped by account type |
+| 2b.3 | Route: `GET /api/documents/:type.pdf` (no-id form) for aging/assets/pl; pl accepts `?from=&to=`, defaults to YTD; entity form unchanged | [x] | |
+| 2b.4 | Tests: integration loop covers all 8 registered types; statement/P&L/aging/assets rendered from a rolled-back fixture — suite 41/41 | [x] | |
+
+### 2b Verification matrix
+
+| Check | Result |
+| --- | --- |
+| Server typecheck | ✅ 0 errors |
+| Server tests | ✅ 41/41 |
+| Live probes | ✅ AGING-2026-09-27.pdf (3,096 B, attachment disposition), assets register (3,175 B), P&L YTD + from/to (2,772/2,776 B), STMT-c2-2026-09-27.pdf (2,956 B) — all valid %PDF-1.3 |
+| Stack shutdown | ✅ ports free |
+
+Remaining in Phase 2 (plan §12): manifest, delivery note (gated on logistics UI flow), balance sheet, trip report (gated on Phase 4 telemetry), client PDF buttons, Inter font embedding.
 
 ---
 
@@ -467,7 +485,7 @@ Remaining in Phase 2 (plan §12): statement, manifest, delivery note, P&L, balan
 | 0b. Theme, components & PWA shells | Vendored tokens + useTheme + StatusBadge + PWA manifests | 1–2 d | [x] |
 | 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; branches removed; §0.9/§0.10/§0.11/§0.12 all done | 3–5 d | [x] |
 | 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [x] — 1a payments+ledger, 1b job dates, 1c costing, 1d assets/depreciation, 1e laundry logistics |
-| 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [~] — 2a pdfkit service + layout kit + invoice/receipt/laundry/job-card downloads done |
+| 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [~] — 2a service + core downloads, 2b statement/aging/P&L/asset register done |
 | 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [ ] |
 | 4. Field operations | Employees, devices, assignments, `/field` beacon, live map, geofences | 8–12 d | [ ] |
 | 5. Sales and manager dashboard | Attribution, pipeline, commissions, role-scoped dashboards | 6–9 d | [ ] |
@@ -518,6 +536,8 @@ Remaining in Phase 2 (plan §12): statement, manifest, delivery note, P&L, balan
 | 2026-09-27 | /api/reset drift fixed: the seed now replicates the 009/011/012 backfill rules (jobs scheduled/completed dates, equipment cost+useful life, laundry stamps) so reset matches a migrated database; depreciation worked again post-reset |
 | 2026-09-27 | Admin UI wired to the Phase 1 spine: laundry intake + status modals (closing the client half of plan issue #11), order timeline + weight/pieces in the table, Depreciate button on asset cards, AppData types extended with the Phase 1 keys, laundry-updated SSE; admin typecheck 0 + build green, UI-shaped payloads probed live |
 | 2026-09-27 | Phase 2a done — PDF documents: `pdfkit` + `services/pdf/layout.ts` (shared layout kit: header/meta/table/totals/footers, WinAnsi-safe sanitize), `services/pdf/documents.ts` (loaders for invoice, receipt, laundry ticket, job card; DOCUMENT_STORAGE_DIR mirroring with numbered filenames), GET `/api/documents/:type/:id.pdf` (all scopes, attachment disposition). Tests 38 → 41. Verified: typecheck 0, live probes — INV-00098.pdf 2,916 bytes / LDY-00216 ticket, 404s for unknown type+id, mirror populated |
+| 2026-09-27 | dev.mjs fail-fast cascade fixed: stale node.exe owners of 5000/5173-5176 are reaped before spawn (verified by orphaning five children and booting cleanly over them) |
+| 2026-09-27 | Phase 2b done — range/register reports: `services/pdf/reports.ts` (customer statement, AR aging with due-date buckets, P&L from journal lines by account type with from/to range, asset register + depreciation schedule), `services/pdf/shared.ts` (brand + mirror extracted), no-id route form `GET /api/documents/:type.pdf` (+ `?from=&to=` for P&L). All 8 registered types covered in-test; live probes render all five new endpoints |
 | 2026-09-27 | Phase 1b done — job dates & assignments: `009_jobs_dates.sql` adds job lifecycle dates (scheduled/quote/promised), instants (started/completed/invoiced/paid — server-managed), salesperson/manager attribution, site address + coordinates, priority; `job_events` + `job_assignments` tables; legacy `date` backfilled everywhere. jobsResource create/patch extended; `/api/data` jobs select widened. Tests 23 → 28. Verified: typecheck 0, migrate clean on dev DB, backfill + cascade probed in-test |
 | 2026-09-27 | Phase 1a done — money spine: `008_money.sql` (chart_of_accounts, payment_methods, payments, journal_entries/lines, PAY/JNL sequence defence), `services/ledger.ts` (balanced postJournalEntry), `services/payments.ts` (createPaymentInTx: PAY numbering + journal + invoice/laundry/customer balance recompute in one transaction), `routes/payments.ts` + `/api/payments` mount, `payments` key in `/api/data`, `payment-created` SSE, money tables added to TRUNCATE set. Verified: server typecheck 0, tests 23/23 (integration tests rollback-clean), live probe: PAY-00003/JNL-00003 balanced, invoice i1 Partially Paid, c2 balance 3,000,000 |
 

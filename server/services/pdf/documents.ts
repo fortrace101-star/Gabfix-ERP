@@ -1,8 +1,14 @@
 import type { PoolClient } from 'pg';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { pool } from '../../db';
 import { renderDocument, type DocumentInput, type ItemRow } from './layout';
+import { brand, mirror, type RenderedDocument } from './shared';
+import { kampalaToday } from '../../lib/dates';
+import {
+  loadAging,
+  loadAssetRegister,
+  loadProfitAndLoss,
+  loadStatement,
+} from './reports';
 
 /**
  * Document registry (Phase 2, plan §12).
@@ -14,37 +20,22 @@ import { renderDocument, type DocumentInput, type ItemRow } from './layout';
  * browser-supplied string.
  */
 
-export type DocumentType = 'invoice' | 'receipt' | 'laundry' | 'job-card';
+export type DocumentType =
+  | 'invoice'
+  | 'receipt'
+  | 'laundry'
+  | 'job-card'
+  | 'statement'
+  | 'aging'
+  | 'pl'
+  | 'assets';
 
-export type RenderedDocument = {
-  buffer: Buffer;
-  filename: string;
-};
-
-/** Storage mirror root (plan: DOCUMENT_STORAGE_DIR, default ./storage/documents). */
-const storageDir = (): string => process.env.DOCUMENT_STORAGE_DIR || join(process.cwd(), 'storage', 'documents');
-
-const brand = {
-  name: process.env.COMPANY_NAME || 'Gabfix',
-  tagline: 'Cleaning, laundry and facility services',
-  phone: process.env.COMPANY_PHONE || '+256 700 000 000',
-  address: 'Kampala, Uganda',
-};
+export type { RenderedDocument };
 
 const money = (value: number | null | undefined) =>
   value === null || value === undefined ? '-' : Math.round(value).toLocaleString('en-US');
 
 const dayText = (value: Date | string | null): string => (value ? String(value).slice(0, 10) : '-');
-
-function mirror(filename: string, buffer: Buffer): void {
-  try {
-    mkdirSync(storageDir(), { recursive: true });
-    writeFileSync(join(storageDir(), filename), buffer);
-  } catch {
-    // The download still succeeds when the mirror directory is unwritable;
-    // messaging re-renders on demand rather than reading the mirror.
-  }
-}
 
 // ── Loaders: one concern per type, all read-only ───────────────────────────
 
@@ -267,12 +258,29 @@ async function loadJobCard(client: PoolClient, id: string): Promise<RenderedDocu
   return { buffer, filename };
 }
 
-const LOADERS: Record<DocumentType, (client: PoolClient, id: string) => Promise<RenderedDocument | null>> = {
-  invoice: loadInvoice,
-  receipt: loadReceipt,
-  laundry: loadLaundryTicket,
-  'job-card': loadJobCard,
+/**
+ * Entity loaders take an id (invoice number, customer id); range/register
+ * loaders ignore it (aging, assets) or parse a from/to pair from it (pl).
+ * The route passes null for the no-id forms.
+ */
+const LOADERS: Record<DocumentType, (client: PoolClient, id: string | null) => Promise<RenderedDocument | null>> = {
+  invoice: (client, id) => loadInvoice(client, id!),
+  receipt: (client, id) => loadReceipt(client, id!),
+  laundry: (client, id) => loadLaundryTicket(client, id!),
+  'job-card': (client, id) => loadJobCard(client, id!),
+  statement: (client, id) => loadStatement(client, id!),
+  aging: (client) => loadAging(client),
+  assets: (client) => loadAssetRegister(client),
+  pl: (client, id) => {
+    // Optional "from/to" reference (2026-01-01/2026-09-27); defaults to YTD.
+    const [from, to] = (id ?? '').split('/');
+    const year = new Date().getFullYear();
+    return loadProfitAndLoss(client, from || `${year}-01-01`, to || kampalaToday());
+  },
 };
+
+/** Types that render without an entity id; the route rejects ids for them. */
+export const ID_LESS_TYPES: DocumentType[] = ['aging', 'assets', 'pl'];
 
 export const DOCUMENT_TYPES = Object.keys(LOADERS) as DocumentType[];
 
@@ -280,10 +288,11 @@ export const DOCUMENT_TYPES = Object.keys(LOADERS) as DocumentType[];
  * Render one document and mirror it; null when the id is unknown.
  * Pass a client to render inside a caller's transaction (tests, or a future
  * flow that must see uncommitted rows); otherwise a pool connection is used.
+ * id may be null for the range/register documents (aging, assets, pl).
  */
 export async function renderTypedDocument(
   type: DocumentType,
-  id: string,
+  id: string | null,
   client?: PoolClient,
 ): Promise<RenderedDocument | null> {
   const loader = LOADERS[type];

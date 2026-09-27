@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderDocument } from '../services/pdf/layout';
 import { DOCUMENT_TYPES, renderTypedDocument } from '../services/pdf/documents';
+import { loadProfitAndLoss } from '../services/pdf/reports';
 import { pool } from '../db';
 import { migrate } from '../migrate';
 
@@ -98,15 +99,34 @@ if (dbUp) {
       );
 
       for (const type of DOCUMENT_TYPES) {
-        const id = type === 'invoice' ? invoiceId : type === 'receipt' ? payment.rows[0].id : type === 'laundry' ? laundryId : jobId;
+        const id =
+          type === 'invoice' ? invoiceId
+          : type === 'receipt' ? payment.rows[0].id
+          : type === 'laundry' ? laundryId
+          : type === 'job-card' ? jobId
+          : type === 'statement' ? customerId
+          : type === 'pl' ? '2026-01-01/2026-12-31'
+          : null; // aging + assets are range/register reports
         const rendered = await renderTypedDocument(type, id, tx);
         assert.ok(rendered, `${type} renders`);
         assert.ok(rendered!.buffer.subarray(0, 5).toString() === '%PDF-', `${type} is a PDF`);
         assert.match(rendered!.filename, /\.pdf$/, `${type} filename ends .pdf`);
       }
 
+      // Range/register reports ignore the fixture ids entirely.
+      for (const type of ['aging', 'assets'] as const) {
+        const rendered = await renderTypedDocument(type, null, tx);
+        assert.ok(rendered, `${type} renders without an id`);
+        assert.ok(rendered!.buffer.subarray(0, 5).toString() === '%PDF-', `${type} is a PDF`);
+      }
+      const pnl = await loadProfitAndLoss(tx, '2026-01-01', '2026-12-31');
+      assert.ok(pnl.buffer.subarray(0, 5).toString() === '%PDF-', 'P&L is a PDF');
+      const statement = await renderTypedDocument('statement', customerId, tx);
+      assert.ok(statement, 'statement renders');
+      assert.match(statement!.filename, /^STMT-/, 'statement filename carries the customer id');
+
       // Unknown ids return null → the route 404s.
-      const missing = await renderTypedDocument('invoice', `pdftest-none-${run}`);
+      const missing = await renderTypedDocument('invoice', `pdftest-none-${run}`, tx);
       assert.equal(missing, null);
 
       await tx.query('ROLLBACK');
