@@ -6,7 +6,7 @@
 | Requirements | [`docs/requirements.md`](../requirements.md) |
 | Baseline commit | `100d0aa` (Pre-refactor baseline snapshot before enhancement work) |
 | Started | 2026-09-25 |
-| Status | Phase 0a complete · Phase 0b complete · Phase 0c complete (identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, client split, SSE, tests+CI) · **Phase 1 in progress** — 1a money spine ✅ · 1b job dates/assignments ✅ · 1c costing ✅ · 1d assets/depreciation ✅; laundry (1e) next |
+| Status | Phase 0a complete · Phase 0b complete · Phase 0c complete (identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, client split, SSE, tests+CI) · **Phase 1 complete** — 1a money spine ✅ · 1b job dates/assignments ✅ · 1c costing ✅ · 1d assets/depreciation ✅ · 1e laundry logistics ✅ |
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -29,7 +29,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | Phase 6 | Real-time upgrade | Socket.IO chat, Inbox, presence, live map | — |
 | Phase 7 | Depth | Payment gateway + reconciliation, scheduled reports, dunning | — |
 
-> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 is in progress**: 1a payments + double-entry ledger done and probed live (plan exit criterion "a payment moves invoice status, customer balance, journal and cash flow together" holds atomically); 1b job dates/priority/site/attribution + job_events/job_assignments done. 1c costing done — jobs.cost comes from real cost lines (the plan's second Phase-1 exit criterion); 1d asset register with a real depreciation schedule done. Remaining: laundry items/dates (1e).
+> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 is complete**: 1a payments + double-entry ledger probed live ("a payment moves invoice status, customer balance, journal and cash flow together"); 1b job dates/priority/site/attribution + job_events/job_assignments; 1c costing ("job cost comes from real cost lines"); 1d asset register with a real depreciation schedule probed live; 1e laundry intake + status timeline with priced line items probed live. Both Phase-1 exit criteria hold. Next: Phase 2 (PDF and documents).
 
 ---
 
@@ -289,7 +289,7 @@ Probe methodology note: routers expose POST/PATCH only (reads via `/api/data`), 
 
 ---
 
-## Phase 1 — Data Spine (in progress)
+## Phase 1 — Data Spine (complete)
 
 Goal: give the operation its financial and operational backbone — payments with a double-entry ledger, job/laundry date and assignment fields, job costing, asset depreciation — each slice independently verifiable per plan §18.1.
 
@@ -380,6 +380,30 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 
 ---
 
+### 1e — Laundry logistics: intake, status timeline, priced items ✅
+
+| Step | What | Status | Notes |
+| --- | --- | --- | --- |
+| 1e.1 | Migration `012_logistics.sql` — laundry_orders gains promised_at, ready_at, collected_at, job_id (SET NULL on job delete), weight_kg, pieces; backfill stamps Ready/Collected seeds on their received day; `laundry_order_items` (service_id FK, qty, unit, unit_price, amount) | [x] | Branchless per decision #9 — the plan's 008 branch_id is obsolete after 006 |
+| 1e.2 | `validation/laundry.ts` — `laundryIntakeCreate` (customer + optional promise/job/weight/pieces + priced lines), `laundryStatusPatch` (enum of the five fulfilment stages); ready/collected stamps are never client-writable → 422 | [x] | Statuses: Received, Washing, Drying, Ready, Collected (plan Appendix D) |
+| 1e.3 | `services/laundry.ts` — `createLaundryOrder(InTx)` prices lines (qty × unit_price or explicit amount), claims LDY numbers transactionally; `updateLaundryStatus(InTx)` stamps ready_at/collected_at server-side on stage moves; stamps never clear, so a regression keeps the history | [x] | Money never touches status — the payments service's fulfilment-vs-money split |
+| 1e.4 | `routes/laundry.ts` mounted at `/api/laundry` (all four scopes): POST `/` intake, PATCH `/:id/status`; both broadcast `laundry-updated` (new SSE type registered server + admin client) | [x] | First-ever laundry write path — closes plan issue #11's server half |
+| 1e.5 | Read layer: `/api/data` laundry select widened with the logistics fields; new `laundryItems` key; laundry_resource row schema accepts the new fields for backup restore; `laundry_order_items` in TRUNCATE_TABLES | [x] | |
+| 1e.6 | Tests: 3 new (intake schema + stamp rejection, status enum, DB integration: 70000 two-line total, LDY- numbering, Ready→Collected stamping, regression keeps stamps, unknown order, cascade cleanup) — suite now 38/38 | [x] | Integration uses a fresh tx client and rolls back |
+
+### 1e Verification matrix
+
+| Check | Result |
+| --- | --- |
+| `012_logistics.sql` applied on the dev DB | ✅ at server boot; backfill verified (l1/l3 stamped 09-03/09-01, Washing/Drying untouched) |
+| Server typecheck | ✅ 0 errors |
+| Server tests | ✅ 38/38 (was 35; +3 laundry) |
+| Live end-to-end probe (booted stack) | ✅ intake → LDY-00219, total 70000 (3×15000 + 25000 explicit); Ready → ready_at 2026-09-27; Collected → collected_at; bad status 422; client-forged stamp 422; order + items in `/api/data` |
+| Numbering continuity | ✅ LDY-00217/218 burned by rolled-back test runs (transactional claim — by design, same as PAY) |
+| Stack shutdown | ✅ all 5 ports free after taskkill |
+
+---
+
 ### 1a Verification matrix
 
 | Check | Result |
@@ -404,7 +428,7 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 | 0a. Multi-app scaffold | 4 apps (admin + 3 new) + root scripts + per-app configs + ports | 2–3 d | [x] |
 | 0b. Theme, components & PWA shells | Vendored tokens + useTheme + StatusBadge + PWA manifests | 1–2 d | [x] |
 | 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; branches removed; §0.9/§0.10/§0.11/§0.12 all done | 3–5 d | [x] |
-| 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [~] — 1a payments+ledger, 1b job dates, 1c costing, 1d assets/depreciation done |
+| 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [x] — 1a payments+ledger, 1b job dates, 1c costing, 1d assets/depreciation, 1e laundry logistics |
 | 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [ ] |
 | 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [ ] |
 | 4. Field operations | Employees, devices, assignments, `/field` beacon, live map, geofences | 8–12 d | [ ] |
@@ -452,6 +476,7 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 | 2026-09-27 | Dev-env fix — admin "ENOENT react/index.js while updating dependencies": root cause was an accidental npm **workspaces** install at the repo root (root `package-lock.json` created during 0c.2c), which hoisted all app deps to `node_modules/` while vite's per-app optimizer and the per-app locks expected standalone installs; the stale admin lock (missing react-router-dom/@tanstack/react-query) then reconciled `node_modules` down and deleted react itself. Fix: removed `workspaces` from root `package.json`, deleted root `package-lock.json`/`node_modules`, clean `npm install` per app dir (matching CI's per-app `npm ci`). Verified: all 4 apps have react locally, stack boots with 0 errors in the log, admin modules transform 200, ports freed |
 | 2026-09-27 | Phase 1c done — job costing: `010_costing.sql` (suppliers, cost_categories with GL links, job_costs, timesheets; partial unique index makes a timesheet un-double-costable), `services/costing.ts` (cost-line insert + jobs.cost recompute once lines exist — the plan's "job cost comes from real cost lines" exit criterion; timesheet approval derives minutes and posts the labour line idempotently), `/api/costs` + `/api/timesheets(/:id/approve)` routes (admin+portal, job-updated SSE), `costCategories`+`suppliers` in /api/data. Tests 28 → 32. Verified: typecheck 0, migrate clean, estimate→lines flip and idempotent re-approval probed in-test |
 | 2026-09-27 | Phase 1d done — asset register: `011_assets.sql` (equipment gains purchase/cost/salvage/useful-life/method/accumulated/disposal/custodian columns + backfill; `asset_depreciation_entries` unique per asset per period; GL 1400/1500/6100 seeded), `services/assets.ts` (straight-line posting debits depreciation expense and credits accumulated depreciation through the ledger; book value = cost − accumulated), POST `/api/assets/:id/depreciate` (admin, equipment-updated SSE), register fields in `/api/data` (+ `depreciationEntries`). `migrate()` gained a session advisory lock after the concurrent-test race. Tests 32 → 35. Verified: typecheck 0, live probe — a1 two 150,000 postings (JNL-00004/5), book value 9,700,000, schedule in /api/data |
+| 2026-09-27 | Phase 1e done — laundry logistics: `012_logistics.sql` (laundry_orders gains promised/ready/collected + job link + weight/pieces with backfill; `laundry_order_items` priced lines; branchless per decision #9), `services/laundry.ts` (priced intake claiming LDY numbers transactionally; status moves stamp ready/collected server-side, stamps never clear), POST `/api/laundry` + PATCH `/api/laundry/:id/status` (all four scopes, laundry-updated SSE — first laundry write path), logistics fields + `laundryItems` in /api/data. Tests 35 → 38. Verified: typecheck 0, live probe — LDY-00219 two-line 70000 intake, stage stamps on Ready/Collected, forged stamps 422. **Phase 1 complete — both plan exit criteria hold** |
 | 2026-09-27 | Phase 1b done — job dates & assignments: `009_jobs_dates.sql` adds job lifecycle dates (scheduled/quote/promised), instants (started/completed/invoiced/paid — server-managed), salesperson/manager attribution, site address + coordinates, priority; `job_events` + `job_assignments` tables; legacy `date` backfilled everywhere. jobsResource create/patch extended; `/api/data` jobs select widened. Tests 23 → 28. Verified: typecheck 0, migrate clean on dev DB, backfill + cascade probed in-test |
 | 2026-09-27 | Phase 1a done — money spine: `008_money.sql` (chart_of_accounts, payment_methods, payments, journal_entries/lines, PAY/JNL sequence defence), `services/ledger.ts` (balanced postJournalEntry), `services/payments.ts` (createPaymentInTx: PAY numbering + journal + invoice/laundry/customer balance recompute in one transaction), `routes/payments.ts` + `/api/payments` mount, `payments` key in `/api/data`, `payment-created` SSE, money tables added to TRUNCATE set. Verified: server typecheck 0, tests 23/23 (integration tests rollback-clean), live probe: PAY-00003/JNL-00003 balanced, invoice i1 Partially Paid, c2 balance 3,000,000 |
 

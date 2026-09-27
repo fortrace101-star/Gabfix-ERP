@@ -14,7 +14,7 @@
 import type { Response } from 'express';
 
 export type RealtimeEvent = {
-  type: 'job-created' | 'job-updated' | 'customer-created' | 'expense-created' | 'equipment-created' | 'equipment-updated' | 'inventory-created' | 'inventory-updated' | 'payment-created' | 'asset-depreciated' | 'workspace-reset';
+  type: 'job-created' | 'job-updated' | 'customer-created' | 'expense-created' | 'equipment-created' | 'equipment-updated' | 'inventory-created' | 'inventory-updated' | 'payment-created' | 'asset-depreciated' | 'laundry-updated' | 'workspace-reset';
   at: string;
   by?: string;
 };

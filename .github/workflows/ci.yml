@@ -58,7 +58,7 @@ jobs:
         working-directory: server
         run: npm test
 
-      - name: Fresh-database bootstrap (creates DB, runs migrations 001-008, seeds)
+      - name: Fresh-database bootstrap (creates DB, runs migrations 001-012, seeds)
         run: npm --prefix server run db:migrate
 
       - name: Confirm schema is branchless (single shop, plan decision #9)

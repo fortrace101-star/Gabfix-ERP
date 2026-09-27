@@ -364,6 +364,12 @@ export const laundryResource: Resource = {
     paid: 'paid',
     items: 'items',
     received: 'received',
+    promisedAt: 'promised_at',
+    readyAt: 'ready_at',
+    collectedAt: 'collected_at',
+    jobId: 'job_id',
+    weightKg: 'weight_kg',
+    pieces: 'pieces',
   },
   create: z.strictObject({}),
   row: z.strictObject({
@@ -375,6 +381,17 @@ export const laundryResource: Resource = {
     paid: optionalMoney,
     items: optionalText.optional(),
     received: optionalDateText,
+    promisedAt: optionalDateText,
+    readyAt: optionalDateText,
+    collectedAt: optionalDateText,
+    jobId: idText.optional(),
+    weightKg: optionalMoney,
+    pieces: z
+      .preprocess(
+        (value) => (typeof value === 'string' && value.trim() !== '' ? Number(value) : value),
+        z.number({ error: 'Must be a number' }).int().nonnegative(),
+      )
+      .optional(),
   }),
 };
 

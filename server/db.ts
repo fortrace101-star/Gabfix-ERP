@@ -24,13 +24,14 @@ export type AppData = {
   costCategories: unknown[];
   suppliers: unknown[];
   depreciationEntries: unknown[];
+  laundryItems: unknown[];
 };
 
 const num = (value: unknown) => (value === null || value === undefined ? 0 : Number(value));
 
 /** Load the whole workspace from PostgreSQL, shaped exactly like the frontend AppData type. */
 export async function getData(): Promise<AppData> {
-  const [customers, services, jobs, invoices, expenses, laundry, equipment, inventory, payments, costCategories, suppliers, depreciationEntries] = await Promise.all([
+  const [customers, services, jobs, invoices, expenses, laundry, equipment, inventory, payments, costCategories, suppliers, depreciationEntries, laundryItems] = await Promise.all([
     pool.query(`SELECT id, name, company, type, phone, email, balance::float8 AS balance, status FROM customers ORDER BY id`),
     pool.query(`SELECT id, name, division, method, price::float8 AS price, active FROM services ORDER BY id`),
     pool.query(`SELECT id, number, customer_id AS "customerId", service_id AS "serviceId",
@@ -48,7 +49,10 @@ export async function getData(): Promise<AppData> {
                        date::text AS date, division
                 FROM expenses ORDER BY date DESC, id DESC`),
     pool.query(`SELECT id, number, customer_id AS "customerId", status, total::float8 AS total, paid::float8 AS paid,
-                       items, received::text AS received
+                       items, received::text AS received,
+                       promised_at::text AS "promisedAt", ready_at::text AS "readyAt",
+                       collected_at::text AS "collectedAt", job_id AS "jobId",
+                       weight_kg::float8 AS "weightKg", pieces
                 FROM laundry_orders ORDER BY received DESC, id DESC`),
     pool.query(`SELECT id, name, serial_number AS "serialNumber", type, value::float8 AS value,
                        book_value::float8 AS "bookValue", condition, next_maintenance::text AS "nextMaintenance",
@@ -74,6 +78,10 @@ export async function getData(): Promise<AppData> {
                        accumulated::float8 AS accumulated, book_value::float8 AS "bookValue",
                        created_at::text AS "createdAt"
                 FROM asset_depreciation_entries ORDER BY equipment_id, period`),
+    pool.query(`SELECT id, order_id AS "orderId", service_id AS "serviceId", description,
+                       qty::float8 AS qty, unit, unit_price::float8 AS "unitPrice",
+                       amount::float8 AS amount
+                FROM laundry_order_items ORDER BY order_id, id`),
   ]);
 
   return {
@@ -89,5 +97,6 @@ export async function getData(): Promise<AppData> {
     costCategories: costCategories.rows,
     suppliers: suppliers.rows,
     depreciationEntries: depreciationEntries.rows,
+    laundryItems: laundryItems.rows,
   };
 }
