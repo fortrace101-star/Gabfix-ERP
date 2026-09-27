@@ -2,12 +2,6 @@
   "name": "gabfix-erp",
   "private": true,
   "version": "0.0.0",
-  "workspaces": [
-    "gabfix-administrator",
-    "gabfix-laundry-front-office",
-    "gabfix-inhouse-erp",
-    "gabfix-store"
-  ],
   "scripts": {
     "setup": "npm --prefix gabfix-administrator install && npm --prefix gabfix-laundry-front-office install && npm --prefix gabfix-inhouse-erp install && npm --prefix gabfix-store install && npm --prefix server install",
     "dev": "node scripts/dev.mjs",
