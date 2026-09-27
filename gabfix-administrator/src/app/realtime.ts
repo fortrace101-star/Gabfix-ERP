@@ -7,7 +7,7 @@ import { useQueryClient } from '@tanstack/react-query';
  * appears without a manual reload. The periodic fallback covers an SSE gap
  * (proxy timeout, sleeping tab).
  */
-const EVENT_TYPES = ['job-created', 'job-updated', 'customer-created', 'expense-created', 'equipment-created', 'equipment-updated', 'inventory-created', 'inventory-updated', 'workspace-reset'];
+const EVENT_TYPES = ['job-created', 'job-updated', 'customer-created', 'expense-created', 'equipment-created', 'equipment-updated', 'inventory-created', 'inventory-updated', 'payment-created', 'workspace-reset'];
 
 export function useRealtimeRefresh() {
   const queryClient = useQueryClient();

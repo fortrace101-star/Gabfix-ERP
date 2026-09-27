@@ -5,3 +5,4 @@
 import './dates.test.ts';
 import './validation.test.ts';
 import './auth.test.ts';
+import './payments.test.ts';

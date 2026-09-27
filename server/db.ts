@@ -20,13 +20,14 @@ export type AppData = {
   laundry: unknown[];
   equipment: unknown[];
   inventory: unknown[];
+  payments: unknown[];
 };
 
 const num = (value: unknown) => (value === null || value === undefined ? 0 : Number(value));
 
 /** Load the whole workspace from PostgreSQL, shaped exactly like the frontend AppData type. */
 export async function getData(): Promise<AppData> {
-  const [customers, services, jobs, invoices, expenses, laundry, equipment, inventory] = await Promise.all([
+  const [customers, services, jobs, invoices, expenses, laundry, equipment, inventory, payments] = await Promise.all([
     pool.query(`SELECT id, name, company, type, phone, email, balance::float8 AS balance, status FROM customers ORDER BY id`),
     pool.query(`SELECT id, name, division, method, price::float8 AS price, active FROM services ORDER BY id`),
     pool.query(`SELECT id, number, customer_id AS "customerId", service_id AS "serviceId",
@@ -49,6 +50,11 @@ export async function getData(): Promise<AppData> {
     pool.query(`SELECT id, name, category, unit, quantity::float8 AS quantity, minimum::float8 AS minimum,
                        cost::float8 AS cost
                 FROM inventory_items ORDER BY id`),
+    pool.query(`SELECT id, number, direction, customer_id AS "customerId", method_id AS "methodId",
+                       amount::float8 AS amount, currency, reference, invoice_id AS "invoiceId",
+                       laundry_order_id AS "laundryOrderId", job_id AS "jobId", status,
+                       received_at::text AS "receivedAt"
+                FROM payments WHERE deleted_at IS NULL ORDER BY received_at DESC, id DESC`),
   ]);
 
   return {
@@ -60,5 +66,6 @@ export async function getData(): Promise<AppData> {
     laundry: laundry.rows,
     equipment: equipment.rows.map((row) => ({ ...row, value: num(row.value), bookValue: num(row.bookValue), usage: num(row.usage) })),
     inventory: inventory.rows,
+    payments: payments.rows,
   };
 }

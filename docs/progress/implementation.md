@@ -6,7 +6,7 @@
 | Requirements | [`docs/requirements.md`](../requirements.md) |
 | Baseline commit | `100d0aa` (Pre-refactor baseline snapshot before enhancement work) |
 | Started | 2026-09-25 |
-| Status | Phase 0a complete · Phase 0b complete · **Phase 0c complete** (identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, client split, SSE, tests+CI) · Phase 1 next |
+| Status | Phase 0a complete · Phase 0b complete · Phase 0c complete (identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, client split, SSE, tests+CI) · **Phase 1 in progress** — 1a money spine done (payments, ledger, numbering); costing, job/laundry dates, assets next |
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -21,7 +21,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | Phase 0a | Multi-app scaffold | Rename `client/` → `gabfix-administrator`; scaffold 3 new Vite+React 18 apps; per-app configs; root dev scripts; ports 5173–5176 | ✅ done |
 | **Phase 0b** | **Theme, components & PWA shells** | **Vendored theme tokens; `useTheme` hook; `StatusBadge` component; PWA manifests + sw; `.env` with `VITE_APP_ID`** | **✅ done** |
 | Phase 0c | Backend multi-app wiring | `005_multiapp_identity` + `006_remove_branches` + `sync_tables` migrations; server identity/roles scoped to 4 apps; §0.9 dates, §0.10 client split, §0.11 SSE, §0.12 CI completion | ✅ done — 0c.1 + 0c.2a/b/c/d/e complete |
-| Phase 1 | Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | — |
+| Phase 1 | Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | [~] — 1a payments + ledger done |
 | Phase 2 | PDF & documents | jsPDF + AutoTable, 14 document types, print/download/attach | — |
 | Phase 3 | Notifications, feedback, real-time | WhatsApp/SMS, completion message, feedback form, SSE | — |
 | Phase 4 | Field operations | Employees, devices, assignments, beacon, map, geofences | — |
@@ -29,7 +29,7 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | Phase 6 | Real-time upgrade | Socket.IO chat, Inbox, presence, live map | — |
 | Phase 7 | Depth | Payment gateway + reconciliation, scheduled reports, dunning | — |
 
-> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 (data spine) is next.**
+> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 is in progress**: 1a payments + double-entry ledger done and probed live (plan exit criterion "a payment moves invoice status, customer balance, journal and cash flow together" holds atomically); remaining slices: job/laundry dates & assignments, costing, assets, engagement, telemetry.
 
 ---
 
@@ -289,6 +289,41 @@ Probe methodology note: routers expose POST/PATCH only (reads via `/api/data`), 
 
 ---
 
+## Phase 1 — Data Spine (in progress)
+
+Goal: give the operation its financial and operational backbone — payments with a double-entry ledger, job/laundry date and assignment fields, job costing, asset depreciation — each slice independently verifiable per plan §18.1.
+
+### 1a — Money spine: payments + double-entry ledger ✅
+
+Migration `008_money.sql` (plan's "005_money", renumbered to the next free file): `chart_of_accounts` (10 seeded accounts: 1000 cash, 1010 momo float, 1020 bank, 1100 AR, 2000 AP, 3000 equity, 4000/4100 revenue, 5000/6000 costs), `payment_methods` (cash, MTN MoMo, Airtel Money, bank, cheque — each linked to its float account), `payments` (server-issued PAY-NNNNN, direction in/out, one-document CHECK, status pending/confirmed/reconciled/voided, soft delete), `journal_entries` + `journal_lines` (server-issued JNL-NNNNN, per-line debit/credit CHECK one-side-only). PAY/JNL sequences seeded in 004 and re-defended in 008 (start above imported numbers).
+
+| Step | Work | Status | Notes |
+| --- | --- | --- | --- |
+| 1a.1 | Migration `008_money.sql` — account chart, methods, payments, journal, touch triggers, sequence defence | [x] | Fresh-DB safe: `chart_of_accounts` is created before `payment_methods` (whose `gl_account_code` references it). `recorded_by`/`posted_by` are UUID (employees.id is UUID) |
+| 1a.2 | `services/ledger.ts` — `postJournalEntry()` posts one balanced entry inside the caller's transaction: ≥2 non-zero lines, rounded debits == credits, JNL numbering via `nextNumber()` | [x] | Rejects unbalanced entries in code before any write (tested with a null client) |
+| 1a.3 | `services/payments.ts` — `createPaymentInTx()`: one transaction claims PAY number, inserts the payment, posts the journal (debit method's float account, credit AR 1100; direction-out flips through AP 2000), recomputes invoice `paid`/status (Paid / Partially Paid / Overdue / Unpaid vs due date), laundry `paid` (status is fulfilment and is never touched by money), customer balance across invoices + laundry | [x] | Method decides the asset account via `payment_methods.gl_account_code`; document must belong to the paying customer; refunds (direction-out) subtract from `paid` via a direction-signed sum |
+| 1a.4 | `routes/payments.ts` + mount `/api/payments` (all four scopes) + SSE `payment-created` broadcast (admin `realtime.ts` EVENT_TYPES extended) | [x] | Custom handler (journal + balance side effects) instead of the generic `createHandler`; published post-response |
+| 1a.5 | Read layer: `/api/data` gains `payments` (snake→camel aliased, deleted rows excluded); admin client receives it in the workspace payload (types updated client-side when the payments UI slice lands) | [x] | Payment rows join every workspace fetch and backup payload shape |
+| 1a.6 | Reset/import safety: `journal_lines`/`journal_entries`/`payments` added to `TRUNCATE_TABLES` (payments reference invoices/customers/laundry_orders/jobs, so CASCADE alone would orphan money rows on reset) | [x] | Import order: paymentsResource not yet in `RESOURCES` — payment restore from backups arrives with the finance UI slice |
+| 1a.7 | Tests: 6 new (payment schema 422s incl. zero/negative amounts, unknown-field rejection, ledger invariant enforced pre-write, transactional payment integration, rollback on unknown method) — suite now 23/23 | [x] | Integration tests run against the real DB and **roll back instead of committing**, so dev/CI databases keep no fixtures (an earlier committed-fixture leak was found via the live probe and fixed); DB unreachable → integration tests skip with a warning |
+
+### 1a Verification matrix
+
+| Check | Result |
+| --- | --- |
+| `npm run db:migrate` applies 008 on the existing dev DB | ✅ applied cleanly; dev DB already had the FK order fix |
+| Server typecheck | ✅ 0 errors |
+| Server tests | ✅ 23/23 (was 17; +6 payments/ledger, DB-gated integration) |
+| Admin typecheck after `realtime.ts` change | ✅ 0 errors |
+| Live end-to-end probe (booted stack, POST /api/payments 250k cash against seed invoice i1) | ✅ `PAY-00003` + `JNL-00003` issued transactionally; journal balanced (debit 1000 cash 250k / credit 1100 AR 250k, `source='payment'`, `source_id` backlink); invoice i1 → Partially Paid paid=250,000; customer c2 balance → 3,000,000; payment visible in `/api/data` with `received_at` on the Kampala day |
+| Test-fixture hygiene | ✅ integration tests roll back; dev DB probed clean after the fix; PAY/JNL sequences never reused (transactional `UPDATE…RETURNING` consumed 00001–00002 during failed runs — by design) |
+| CI workflow notes | ✅ fresh-db migrate step renamed 001→008; postgres:16 service runs the DB-gated integration tests |
+| Stack boot/shutdown via `scripts/dev.mjs` | ✅ all 5 ports bound; `ALL_PORTS_FREE` after taskkill |
+
+> Design notes: numbers are claimed inside the payment transaction (`nextNumber` `UPDATE…RETURNING`), so a rolled-back payment burns its number — correct, never reuse. `deleted_at` soft deletes keep receipts auditable; counted statuses are confirmed/reconciled only. Journal lines carry optional customer/job dimensions for later P&L-by-customer reporting.
+
+---
+
 ## Later phases (summary — see plan §18.1)
 
 | Phase | Goal | Estimate | Status |
@@ -296,7 +331,7 @@ Probe methodology note: routers expose POST/PATCH only (reads via `/api/data`), 
 | 0a. Multi-app scaffold | 4 apps (admin + 3 new) + root scripts + per-app configs + ports | 2–3 d | [x] |
 | 0b. Theme, components & PWA shells | Vendored tokens + useTheme + StatusBadge + PWA manifests | 1–2 d | [x] |
 | 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; branches removed; §0.9/§0.10/§0.11/§0.12 all done | 3–5 d | [x] |
-| 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [ ] |
+| 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [~] — 1a payments + ledger done |
 | 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [ ] |
 | 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [ ] |
 | 4. Field operations | Employees, devices, assignments, `/field` beacon, live map, geofences | 8–12 d | [ ] |
@@ -341,6 +376,7 @@ Probe methodology note: routers expose POST/PATCH only (reads via `/api/data`), 
 | 2026-09-27 | API port moved 4000 → 5000 (user request): server default `PORT` fallback, all 4 vite proxies, CI health-check URL, `server/.env.example`, README; `server/.env` already updated by hand. Seed UUIDs containing "4000" and the SSE 4s reconnect delay were left untouched (not port references). Probe note: ports 5173/5174/4000 were occupied by another project's dev servers — killed with permission before booting |
 | 2026-09-27 | Smoke test of the full stack after the port move: all 4 apps served their titles on 5173–5176, `/api/health` green through the 5173 proxy, SSE streamed through the proxy, `scripts/dev.mjs` shutdown freed every port. Also cleared two duplicate nodemon→tsx chains that were fighting over :5000 |
 | 2026-09-27 | Phase 0c.2c done (§0.10) — **Phase 0c complete**: admin client split into `app/` (store.tsx react-query context, realtime.ts SSE hook, layout/Sidebar+Topbar), `features/` (9 views incl. modals), `lib/` (money, csv, format, profile), `components/ui.tsx`; react-router-dom deep links + @tanstack/react-query cache; `App.tsx` 641 → 92 lines; lint baseline 20 → 0 errors. Verified: typecheck 0, build + PWA green, 9 deep links 200 on the live server, root typecheck 0, server tests 17/17 |
+| 2026-09-27 | Phase 1a done — money spine: `008_money.sql` (chart_of_accounts, payment_methods, payments, journal_entries/lines, PAY/JNL sequence defence), `services/ledger.ts` (balanced postJournalEntry), `services/payments.ts` (createPaymentInTx: PAY numbering + journal + invoice/laundry/customer balance recompute in one transaction), `routes/payments.ts` + `/api/payments` mount, `payments` key in `/api/data`, `payment-created` SSE, money tables added to TRUNCATE set. Verified: server typecheck 0, tests 23/23 (integration tests rollback-clean), live probe: PAY-00003/JNL-00003 balanced, invoice i1 Partially Paid, c2 balance 3,000,000 |
 
 
 
