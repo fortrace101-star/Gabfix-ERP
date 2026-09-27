@@ -94,11 +94,11 @@ export async function seedData(client: ClientBase) {
   );
 
   await client.query(
-    `INSERT INTO laundry_orders (id, number, customer_id, status, total, paid, items, received) VALUES
-      ('l1', 'LDY-00216', 'c7', 'Ready', 85000, 50000, '10kg wash + iron', '2026-09-03'),
-      ('l2', 'LDY-00215', 'c1', 'Washing', 125000, 125000, 'Blankets, shirts, duvet', '2026-09-02'),
-      ('l3', 'LDY-00214', 'c4', 'Collected', 64000, 64000, '16kg wash', '2026-09-01'),
-      ('l4', 'LDY-00213', 'c6', 'Drying', 210000, 0, 'Hotel linen bundle', '2026-09-03')
+    `INSERT INTO laundry_orders (id, number, customer_id, status, total, paid, items, received, ready_at, collected_at) VALUES
+      ('l1', 'LDY-00216', 'c7', 'Ready', 85000, 50000, '10kg wash + iron', '2026-09-03', '2026-09-03', NULL),
+      ('l2', 'LDY-00215', 'c1', 'Washing', 125000, 125000, 'Blankets, shirts, duvet', '2026-09-02', NULL, NULL),
+      ('l3', 'LDY-00214', 'c4', 'Collected', 64000, 64000, '16kg wash', '2026-09-01', '2026-09-01', '2026-09-01'),
+      ('l4', 'LDY-00213', 'c6', 'Drying', 210000, 0, 'Hotel linen bundle', '2026-09-03', NULL, NULL)
      ON CONFLICT (id) DO NOTHING`
   );
 
