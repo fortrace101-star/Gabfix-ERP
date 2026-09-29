@@ -60,14 +60,17 @@ const navGroups = [
     items: [
       { label: "Inventory", icon: Boxes },
       { label: "Assets", icon: HardHat },
-      { label: "Staff", icon: Users },
+      { label: "Staff", icon: Users, navigateTo: "employees" },
       { label: "Messages", icon: MessageSquareText, count: 5 },
       { label: "Sync health", icon: Wifi },
     ],
   },
   {
     label: "Monitoring",
-    items: [{ label: "Request Logs", icon: Activity, navigateTo: "logs" }],
+    items: [
+      { label: "Request Logs", icon: Activity, navigateTo: "logs" },
+      { label: "Server settings", icon: Settings, navigateTo: "settings" },
+    ],
   },
 ];
 
@@ -190,7 +193,7 @@ function StatusBadge({ tone, children }: { tone: string; children: string }) {
 export function AdminDashboard({
   onNavigate,
 }: {
-  onNavigate?: (page: "dashboard" | "logs") => void;
+  onNavigate?: (page: "dashboard" | "logs" | "employees" | "settings") => void;
 }) {
   const live = useWorkspaceMetrics();
   const [session, setSession] = useState<StaffSession | null>(null);
@@ -275,7 +278,7 @@ export function AdminDashboard({
                     key={item.label}
                     title={collapsed ? item.label : undefined}
                     onClick={() =>
-                      item.navigateTo && onNavigate?.(item.navigateTo as "dashboard" | "logs")
+                      item.navigateTo && onNavigate?.(item.navigateTo as "dashboard" | "logs" | "employees" | "settings")
                     }
                     className={cn(
                       "group flex h-10 w-full items-center gap-3 rounded-md px-3 text-sm transition-colors",

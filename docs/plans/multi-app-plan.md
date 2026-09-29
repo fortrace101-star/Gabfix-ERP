@@ -31,7 +31,7 @@
 | Per-app request logging | ✅ done | `middleware/requestLogger.ts`: ring buffer + `logs.jsonl` persistence + SSE `request-log` + **console line `[store] GET /api/inventory 200 12ms`** + admin-only `GET /api/logs` |
 | Admin log viewer | ✅ done | Admin `RequestLogsPage` + `LogFeed`/`LogFilters`/`LogHistory` over `/api/logs` |
 | **Seeded store dataset** | ✅ done | Migration `016_store_tables.sql` + `seedData`: suppliers (10) w/ contacts+ratings+spend, contract inventory (12 `MAT-…` items, `kind='contract'`, code/supplier/location), movements (8), purchase requests (5), tool checkouts (7), utility captures (6); `/api/reset` restores everything incl. settings + message templates; `/api/data` exposes `inventoryMovements`, `purchaseRequests`, `toolCheckouts`, `utilityCaptures` |
-| Admin app | ⚠️ prototype | Scaffolded + split UI kit (46 shadcn components) but still prototype-shaped (`AdminDashboard` in one component; no employees/scope management; no login screen) |
+| Admin app | 🔶 control plane landing | Login + ProtectedRoute + employees/app_scope management UI (B3) + settings UI (B4) + log viewer shipped; dashboard still prototype-shaped pending the B1 split and G1–G4 depth |
 | Laundry FO app | ⚠️ prototype | Router + ProtectedRoute + Dexie `offline-db.ts` + dashboard shell; auth points at `/auth/sign-in` (server contract mismatch, see §4.2) |
 | Portal app | ⚠️ prototype | Auth page + empty shell; `portalApi` targets `/auth/sign-in` (mismatch) |
 | Store app | ⚠️ prototype | 6 pages on client fixtures (`store-data.ts`); **no API client yet**; PWA ✅ (added 2026-09-29). Phase E swaps fixtures for `/api/data` — the DB now carries the identical rows |

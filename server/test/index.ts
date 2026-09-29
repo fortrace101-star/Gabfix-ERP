@@ -13,3 +13,4 @@ import './laundry.test.ts';
   import './pdf.test.ts';
 import './notifications.test.ts';
 import './telemetry.test.ts';
+import './employees.test.ts';

@@ -47,14 +47,17 @@ export function verifyToken(token: string, typ: 'access' | 'refresh'): AuthUser 
   try {
     const payload = jwt.verify(token, secret) as jwt.JwtPayload;
     if (payload.typ !== typ || typeof payload.sub !== 'string') return null;
-    // Tokens minted before Phase 0c carry no app_scope; treat them as
-    // control-plane tokens so existing admin sessions keep working.
-    const app_scope = readScope(payload.app_scope);
+    // Legacy shim: tokens minted before Phase 0c carry NO app_scope key at all;
+    // treat those as control-plane tokens so pre-existing sessions keep working.
+    // Tokens minted since 0c always carry the key — an empty array means the
+    // employee's scopes were revoked, and it must stay empty (no implicit grant).
+    const legacy = !('app_scope' in payload);
+    const app_scope = legacy ? ['admin'] : readScope(payload.app_scope);
     return {
       id: payload.sub,
       name: String(payload.name ?? ''),
       role: String(payload.role ?? ''),
-      app_scope: app_scope.length ? app_scope : ['admin'],
+      app_scope,
     };
   } catch {
     return null;

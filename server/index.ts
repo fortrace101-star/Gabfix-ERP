@@ -20,6 +20,8 @@ import { logsRouter } from './routes/logs';
 import { workspaceRouter } from './routes/workspace';
 import { notificationsRouter } from './routes/notifications';
 import { telemetryRouter } from './routes/telemetry';
+import { employeesRouter } from './routes/employees';
+import { settingsRouter } from './routes/settings';
 import { guard, requireScope } from './middleware/auth';
 import { requestLogger } from './middleware/requestLogger';
 
@@ -92,6 +94,10 @@ app.use('/api', adminRouter); // POST /api/import, POST /api/reset (owner-only i
 // Feedback form is public (no auth); bell-panel reads are guarded by /api guard.
 app.use('/api', scoped('admin', 'portal', 'laundry', 'store'), notificationsRouter);
 app.use('/api', scoped('admin', 'portal', 'laundry', 'store'), telemetryRouter);
+// Control plane (plan v5 B3/B4): employees & access management + server settings.
+// Owner/manager checks live inside the routers (requireRole/guard('owner','manager')).
+app.use('/api/employees', scoped('admin'), employeesRouter);
+app.use('/api/settings', scoped('admin'), settingsRouter);
 // Feedback links are shared via email/WhatsApp — mount public routes outside guard.
 app.use('/', notificationsRouter);
 

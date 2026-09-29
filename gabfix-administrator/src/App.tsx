@@ -2,6 +2,8 @@ import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react
 import { BrowserRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { AdminDashboard } from "@/components/admin-dashboard";
 import { RequestLogsPage } from "@/components/RequestLogsPage";
+import { EmployeesPage } from "@/components/EmployeesPage";
+import { SettingsPage } from "@/components/SettingsPage";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { registerAdminServiceWorker } from "@/lib/pwa";
 
@@ -56,11 +58,25 @@ class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState>
 /** Bridges the prototype's page-state navigation to real routes (Phase B1 refactors). */
 function DashboardPage() {
   const navigate = useNavigate();
-  return <AdminDashboard onNavigate={(page) => navigate(page === "logs" ? "/logs" : "/")} />;
+  return (
+    <AdminDashboard
+      onNavigate={(page) =>
+        navigate(page === "logs" ? "/logs" : page === "employees" ? "/employees" : page === "settings" ? "/settings" : "/")
+      }
+    />
+  );
 }
 
 function LogsPage() {
   return <RequestLogsPage onBack={() => window.history.back()} />;
+}
+
+function EmployeesRoute() {
+  return <EmployeesPage onBack={() => window.history.back()} />;
+}
+
+function SettingsRoute() {
+  return <SettingsPage onBack={() => window.history.back()} />;
 }
 
 export default function App() {
@@ -85,6 +101,22 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <LogsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/employees"
+              element={
+                <ProtectedRoute>
+                  <EmployeesRoute />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <SettingsRoute />
                 </ProtectedRoute>
               }
             />
