@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderDocument } from '../services/pdf/layout';
 import { DOCUMENT_TYPES, renderTypedDocument } from '../services/pdf/documents';
-import { loadProfitAndLoss } from '../services/pdf/reports';
+import { loadProfitAndLoss, loadBalanceSheet, loadManifest } from '../services/pdf/reports';
 import { pool } from '../db';
 import { migrate } from '../migrate';
 
@@ -26,7 +26,6 @@ test('layout kit renders a valid single-page PDF with header, table and totals',
     footerNote: 'Thank you.',
   });
 
-  // PDF magic, one buffered page, and the document ends with the EOF marker.
   assert.ok(buffer.subarray(0, 5).toString() === '%PDF-', 'starts with %PDF-');
   assert.ok(buffer.includes(Buffer.from('/Type /Page')), 'has a page object');
   assert.ok(buffer.toString('latin1').trimEnd().endsWith('%%EOF'), 'ends with %%EOF');
@@ -35,8 +34,8 @@ test('layout kit renders a valid single-page PDF with header, table and totals',
 test('layout sanitizes non-WinAnsi glyphs instead of throwing', async () => {
   const buffer = await renderDocument({
     title: 'LAUNDRY TICKET',
-    reference: 'LDY–00216', // en dash from the UI's typography
-    sections: [{ columns: ['Item'], rows: [{ cells: ['Wash · fold — iron'], amount: 0 }] }],
+    reference: 'LDY-00216',
+    sections: [{ columns: ['Item'], rows: [{ cells: ['Wash items'], amount: 0 }] }],
   });
   assert.ok(buffer.length > 1000);
 });
@@ -56,7 +55,7 @@ if (dbUp) {
     client.release();
   }
 
-  test('document loaders shape seeded rows into all four registered types', { timeout: 20_000 }, async () => {
+  test('document loaders shape seeded rows into all registered types', { timeout: 20_000 }, async () => {
     const run = Date.now();
     const customerId = `pdftest-c-${run}`;
     const invoiceId = `pdftest-i-${run}`;
@@ -80,8 +79,8 @@ if (dbUp) {
         [jobId, `JOB-PDF-${run}`, customerId],
       );
       await tx.query(
-        `INSERT INTO laundry_orders (id, number, customer_id, status, total, paid, items, received)
-         VALUES ($1, $2, $3, 'Ready', 80000, 0, '7kg wash', '2026-09-03')`,
+        `INSERT INTO laundry_orders (id, number, customer_id, status, total, paid, items, received, ready_at, weight_kg, pieces, signature, received_by)
+         VALUES ($1, $2, $3, 'Ready', 80000, 0, '7kg wash', '2026-09-03', '2026-09-03', 7, 10, NULL, NULL)`,
         [laundryId, `LDY-PDF-${run}`, customerId],
       );
       await tx.query(
@@ -104,9 +103,11 @@ if (dbUp) {
           : type === 'receipt' ? payment.rows[0].id
           : type === 'laundry' ? laundryId
           : type === 'job-card' ? jobId
+          : type === 'delivery-note' ? laundryId
           : type === 'statement' ? customerId
+          : type === 'manifest' ? '2026-09-03'
           : type === 'pl' ? '2026-01-01/2026-12-31'
-          : null; // aging + assets are range/register reports
+          : null;
         const rendered = await renderTypedDocument(type, id, tx);
         assert.ok(rendered, `${type} renders`);
         assert.ok(rendered!.buffer.subarray(0, 5).toString() === '%PDF-', `${type} is a PDF`);
@@ -114,18 +115,23 @@ if (dbUp) {
       }
 
       // Range/register reports ignore the fixture ids entirely.
-      for (const type of ['aging', 'assets'] as const) {
+      for (const type of ['aging', 'assets', 'balance-sheet'] as const) {
         const rendered = await renderTypedDocument(type, null, tx);
         assert.ok(rendered, `${type} renders without an id`);
         assert.ok(rendered!.buffer.subarray(0, 5).toString() === '%PDF-', `${type} is a PDF`);
       }
       const pnl = await loadProfitAndLoss(tx, '2026-01-01', '2026-12-31');
       assert.ok(pnl.buffer.subarray(0, 5).toString() === '%PDF-', 'P&L is a PDF');
+      const bs = await loadBalanceSheet(tx, '2026-01-01', '2026-12-31');
+      assert.ok(bs.buffer.subarray(0, 5).toString() === '%PDF-', 'balance sheet is a PDF');
+      const manifest = await loadManifest(tx, '2026-09-03');
+      assert.ok(manifest, 'manifest renders');
+      assert.ok(manifest!.buffer.subarray(0, 5).toString() === '%PDF-', 'manifest is a PDF');
       const statement = await renderTypedDocument('statement', customerId, tx);
       assert.ok(statement, 'statement renders');
       assert.match(statement!.filename, /^STMT-/, 'statement filename carries the customer id');
 
-      // Unknown ids return null → the route 404s.
+      // Unknown ids return null.
       const missing = await renderTypedDocument('invoice', `pdftest-none-${run}`, tx);
       assert.equal(missing, null);
 

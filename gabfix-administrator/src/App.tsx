@@ -1,92 +1,96 @@
-import { useEffect, useState } from 'react';
-import { BrowserRouter, Route, Routes, useNavigate, useParams } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Check } from 'lucide-react';
-import { WorkspaceProvider, useWorkspace } from './app/store';
-import { useRealtimeRefresh } from './app/realtime';
-import { Sidebar } from './app/layout/Sidebar';
-import { Topbar } from './app/layout/Topbar';
-import { Dashboard } from './features/dashboard';
-import { JobsView } from './features/jobs';
-import { CustomersView } from './features/customers';
-import { FinanceView } from './features/finance';
-import { LaundryView } from './features/laundry';
-import { EquipmentView, InventoryView } from './features/assets';
-import { ReportsView } from './features/reports';
-import { SettingsView } from './features/settings';
-import { ModalShell } from './features/modals';
-import { Button } from './components/ui';
-import type { View } from './types';
+import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react";
+import { BrowserRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { AdminDashboard } from "@/components/admin-dashboard";
+import { RequestLogsPage } from "@/components/RequestLogsPage";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import { registerAdminServiceWorker } from "@/lib/pwa";
 
-/**
- * Workspace shell (Phase 0.10 client split): routing, providers and layout.
- * Screens live in src/features, shared UI in src/components, helpers in
- * src/lib, and the data/UI state in src/app/store.tsx. The URL mirrors the
- * active view so deep links such as /jobs or /reports open the right screen.
- */
+const AuthPage = lazy(() => import("@/pages/auth"));
 
-const VALID_VIEWS: View[] = ['dashboard', 'jobs', 'customers', 'finance', 'laundry', 'equipment', 'inventory', 'reports', 'settings'];
+type ErrorBoundaryProps = { children: ReactNode };
+type ErrorBoundaryState = { error: Error | null };
 
-const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } } });
+class AppErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  override state: ErrorBoundaryState = { error: null };
 
-function WorkspaceShell() {
-  const { view: routeView } = useParams();
-  const { view, setView, loading, loadError, refresh, toast } = useWorkspace();
-  const navigate = useNavigate();
-  const [mobileOpen, setMobileOpen] = useState(false);
-  useRealtimeRefresh();
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { error };
+  }
 
-  // URL → view: a deep link like /jobs selects the view; unknown paths fall
-  // back to the dashboard.
-  useEffect(() => {
-    if (routeView && VALID_VIEWS.includes(routeView as View)) {
-      if (routeView !== view) setView(routeView as View);
-      return;
+  override componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error(error, info.componentStack);
+  }
+  override render() {
+    if (this.state.error) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-background px-4">
+          <div className="max-w-md text-center">
+            <h1 className="text-xl font-semibold tracking-tight text-foreground">
+              This page didn't load
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Something went wrong on our end. You can try refreshing or head back home.
+            </p>
+            <div className="mt-6 flex flex-wrap justify-center gap-2">
+              <button
+                onClick={() => this.setState({ error: null })}
+                className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                Try again
+              </button>
+              <a
+                href="/"
+                className="inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+              >
+                Go home
+              </a>
+            </div>
+          </div>
+        </div>
+      );
     }
-    navigate('/dashboard', { replace: true });
-  }, [routeView, view, setView, navigate]);
+    return this.props.children;
+  }
+}
 
-  // view → URL: sidebar and in-page navigation keep the address bar in sync.
-  useEffect(() => {
-    if (view !== routeView) navigate(`/${view}`);
-  }, [view, routeView, navigate]);
+/** Bridges the prototype's page-state navigation to real routes (Phase B1 refactors). */
+function DashboardPage() {
+  const navigate = useNavigate();
+  return <AdminDashboard onNavigate={(page) => navigate(page === "logs" ? "/logs" : "/")} />;
+}
 
-  const renderView = () => {
-    if (loading) return <div className="empty-state"><strong>Loading your workspace…</strong><span>Fetching records from the database</span></div>;
-    if (loadError) return <div className="empty-state"><strong>Cannot reach the database</strong><span>{loadError}</span><Button onClick={() => void refresh()}>Retry</Button></div>;
-    if (view === 'dashboard') return <Dashboard />;
-    if (view === 'jobs') return <JobsView />;
-    if (view === 'customers') return <CustomersView />;
-    if (view === 'finance') return <FinanceView />;
-    if (view === 'laundry') return <LaundryView />;
-    if (view === 'equipment') return <EquipmentView />;
-    if (view === 'inventory') return <InventoryView />;
-    if (view === 'reports') return <ReportsView />;
-    return <SettingsView />;
-  };
-
-  return <div className="app-shell">
-    <Sidebar mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
-    {mobileOpen && <button className="mobile-backdrop" onClick={() => setMobileOpen(false)} aria-label="Close navigation" />}
-    <main className="main-content">
-      <Topbar setMobileOpen={setMobileOpen} />
-      <div className="page-content">{renderView()}</div>
-    </main>
-    <ModalShell />
-    {toast && <div className="toast"><Check size={16} />{toast}</div>}
-  </div>;
+function LogsPage() {
+  return <RequestLogsPage onBack={() => window.history.back()} />;
 }
 
 export default function App() {
+  void registerAdminServiceWorker();
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <WorkspaceProvider>
-        <BrowserRouter>
+    <AppErrorBoundary>
+      <BrowserRouter>
+        <Suspense fallback={null}>
           <Routes>
-            <Route path="*" element={<WorkspaceShell />} />
+            <Route path="/auth" element={<AuthPage />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <DashboardPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/logs"
+              element={
+                <ProtectedRoute>
+                  <LogsPage />
+                </ProtectedRoute>
+              }
+            />
           </Routes>
-        </BrowserRouter>
-      </WorkspaceProvider>
-    </QueryClientProvider>
+        </Suspense>
+      </BrowserRouter>
+    </AppErrorBoundary>
   );
 }

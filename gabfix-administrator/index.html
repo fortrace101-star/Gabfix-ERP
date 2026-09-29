@@ -1,29 +1,16 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/logo.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gabfix Admin Console</title>
+    <meta name="theme-color" content="#07170f" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <title>Gabfix ERP</title>
-    <meta property="og:title" content="Gabfix ERP" />
-    <meta property="og:description" content="Gabfix ERP Management System" />
-    <meta property="og:image" content="/logo.png" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Gabfix ERP" />
-    <meta name="twitter:image" content="/logo.png" />
-    <script>
-      try {
-        var saved = localStorage.getItem('gabfix-theme-admin');
-        var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-        document.documentElement.setAttribute('data-theme', theme);
-        document.documentElement.style.colorScheme = theme;
-      } catch (e) {}
-    </script>
+    <link rel="apple-touch-icon" href="/icons/gabfix-192.png" />
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

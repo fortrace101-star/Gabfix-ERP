@@ -1,64 +1,83 @@
 # Gabfix ERP
 
-Monorepo with two projects:
+Monorepo: one Express + PostgreSQL server, four React (Vite) PWAs.
 
-- `client/` — React + Vite frontend
-- `server/` — Node (Express) API backed by a local PostgreSQL database
+| Folder | App | Dev port | Purpose |
+| --- | --- | --- | --- |
+| `server/` | Gabfix API | 5000 | Express + PostgreSQL: data spine, auth, documents, SSE, request logging |
+| `gabfix-administrator/` | Admin Console (`admin`) | 5173 | Control-plane apex: staff + app access management, dashboards, log viewer |
+| `gabfix-laundry-front-office/` | Laundry Front Office (`laundry`) | 5174 | Counter ops: intake, status board, offline-first (Dexie) |
+| `gabfix-inhouse-erp/` | Portal (`portal`) | 5175 | Technician portal: my jobs, timesheets, field beacon |
+| `gabfix-store/` | Store (`store`) | 5176 | Storekeeper: materials, tools, purchase requests, utilities |
 
 ## Getting started
 
-1. Make sure PostgreSQL is running locally, then adjust `server/.env` if your credentials differ:
-   - Defaults: `localhost:5432`, user `postgres`, database `gabfix`
-2. Install dependencies (both projects at once):
+1. PostgreSQL running locally; adjust `server/.env` if needed (defaults:
+   `localhost:5432`, user `postgres`, database `gabfix`).
+2. Install and run the API:
+   ```sh
+   cd server
+   npm i
+   npm run dev        # http://localhost:5000
    ```
-   npm run setup
-   ```
-3. Run the API and the web app together:
-   ```
+   On startup the server bootstraps the database automatically: creates the
+   `gabfix` database if missing, applies pending files from `server/migrations/`
+   (tracked in `schema_migrations`), and seeds the full workspace (core demo
+   data, store dataset, settings, message templates) when the database is
+   empty. `POST /api/reset` restores the same complete workspace at any time.
+3. Run any frontend (each is an independent Vite app):
+   ```sh
+   cd gabfix-administrator   # or any other app folder
+   npm i
    npm run dev
-   ```    - API: http://localhost:5000 (also proxied under `/api` for the web app)
-   - Web: http://localhost:5173
+   ```
 
-   On startup the server bootstraps the database automatically: it creates the
-   `gabfix` database if it does not exist, applies pending files from
-   `server/migrations/` (tracked in the `schema_migrations` table), and seeds
-   demo data when the database is empty. `npm run db:init` runs the same steps
-   manually; `npm run db:migrate` applies migrations only.
+## Environment (per app)
 
-## Scripts
+Copy `.env.example` to `.env` in each app folder:
 
-| Root script          | What it does                                    |
-| -------------------- | ----------------------------------------------- |
-| `npm run setup`      | Installs deps for `client/` and `server/`       |
-| `npm run dev`        | Runs client + server concurrently               |
-| `npm run dev:client` | Client (Vite) only                              |
-| `npm run dev:server` | Server (Express) only                           |
-| `npm run db:init`    | Creates the database, applies migrations, seeds (also runs automatically on server start) |
-| `npm run db:migrate` | Applies pending `server/migrations/*.sql` files only |
-| `npm run build`      | Production build of the client                  |
-| `npm run typecheck`  | TypeScript checks for both projects             |
+```
+VITE_API_BASE_URL=http://localhost:5000/api
+VITE_APP_ID=admin|laundry|portal|store
+```
 
-Each project also has its own `package.json`, so you can work inside `client/` or `server/` directly (e.g. `cd server && npm run dev`).
+Every request carries the `X-App-Id` header; the server logs it as
+`[<appId>] GET /api/... 200 12ms` (console, ring buffer, `logs.jsonl`, SSE,
+and the admin-only `GET /api/logs` history).
+
+## Auth model
+
+- Staff accounts are created in the Admin Console — no self sign-up anywhere.
+- Canonical contract: `POST /api/auth/login|refresh`, `GET /api/auth/me`,
+  `/logout` → `{accessToken, refreshToken, user: {id, name, role, app_scope}}`.
+- An employee's `app_scope[]` (admin/laundry/portal/store) decides which apps
+  they can use; the server enforces it per mount (`AUTH_ENFORCE=true` is the
+  go-live switch).
 
 ## How data works
 
-- All records live in PostgreSQL — the browser no longer stores anything in localStorage.
-- `GET /api/data` returns the full workspace snapshot the UI renders.
-- Creating/updating records goes through the REST endpoints in `server/routes/` (one router per domain).
-- Settings → Backup & restore exports/imports the same JSON via `/api/import`, and "Reset demo data" reseeds the database through `/api/reset`.
+- All records live in PostgreSQL — no client-side database, no BaaS.
+- `GET /api/data` returns the whole workspace snapshot (including the store's
+  inventory/movements/purchase-requests/tools/utility captures) and is what
+  every app renders from.
+- Writes go through the REST endpoints in `server/routes/` (one router per
+  domain). Cross-app updates arrive via SSE at `/api/events`.
+- Documents (11 PDF types) are generated server-side at
+  `/api/documents/:type(/:id).pdf`.
 
 ## Structure
 
 ```
-├── client/            React app (Vite, Tailwind); src/api.ts is the gateway to the backend
-├── server/            Express API
-│   ├── index.ts       Wiring only: middleware, routers, 404, listen
-│   ├── routes/        One router per domain (auth, workspace, customers, jobs, equipment, expenses, services, inventory, admin)
-│   ├── repositories/  SQL and data access (workspace reads, generic record writes)
-│   ├── lib/           Shared helpers (table metadata, HTTP error handling)
-│   ├── middleware/    Auth guard (requireAuth / requireRole / guard)
-│   ├── migrations/    Additive SQL files applied by migrate.ts, tracked in schema_migrations
-│   ├── bootstrap-db.ts  Creates the database, migrates and seeds on startup
-│   └── seed-data.ts   Demo data plus the owner login
-└── scripts/dev.mjs    Concurrent dev runner used by `npm run dev`
+├── server/                      Express API
+│   ├── index.ts                 Wiring: middleware, scoped routers, SSE, listen
+│   ├── routes/                  One router per domain (auth, workspace, …)
+│   ├── repositories/            SQL + data access
+│   ├── middleware/              auth (guard/requireScope), request logger
+│   ├── migrations/              Additive SQL applied by migrate.ts (001→016)
+│   └── seed-data.ts             Full workspace seed (core + store + settings)
+├── gabfix-administrator/        Admin Console (PWA)
+├── gabfix-laundry-front-office/ Laundry Front Office (offline-first PWA)
+├── gabfix-inhouse-erp/          Portal (PWA)
+├── gabfix-store/                Store (PWA)
+└── docs/                        Plans, progress log, UI reference boards
 ```

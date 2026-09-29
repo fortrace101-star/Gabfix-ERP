@@ -6,7 +6,7 @@
 | Requirements | [`docs/requirements.md`](../requirements.md) |
 | Baseline commit | `100d0aa` (Pre-refactor baseline snapshot before enhancement work) |
 | Started | 2026-09-25 |
-| Status | Phase 0a complete · Phase 0b complete · Phase 0c complete (identity scopes, sync tables, auth/CORS, branches removed, Kampala dates, client split, SSE, tests+CI) · **Phase 1 complete** — 1a money spine ✅ · 1b job dates/assignments ✅ · 1c costing ✅ · 1d assets/depreciation ✅ · 1e laundry logistics ✅ · **Phase 2 in progress** — 2a pdfkit service + core documents ✅ |
+| Status | Phases 0–4 complete (scaffold, multi-app wiring, data spine, PDFs, notifications, telemetry) · **Multi-app plan v5 active** — Phase A complete: Supabase/Lovable purge + server-API reconfiguration (all four apps on `POST /auth/login` + `GET /api/data`, guarded shells, one live-data slice each) · Next: Phase B (Admin Console control plane) · 2026-09-29: request logging, store PWA, all data seeded to DB (`016_store_tables.sql`), plan restructured to v5 |
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -22,14 +22,14 @@ The enhancement plan (`enhance.md`) is sequenced in 8 phases. Phase 0 is the mul
 | **Phase 0b** | **Theme, components & PWA shells** | **Vendored theme tokens; `useTheme` hook; `StatusBadge` component; PWA manifests + sw; `.env` with `VITE_APP_ID`** | **✅ done** |
 | Phase 0c | Backend multi-app wiring | `005_multiapp_identity` + `006_remove_branches` + `sync_tables` migrations; server identity/roles scoped to 4 apps; §0.9 dates, §0.10 client split, §0.11 SSE, §0.12 CI completion | ✅ done — 0c.1 + 0c.2a/b/c/d/e complete |
 | Phase 1 | Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | [~] — 1a payments+ledger, 1b job dates/assignments done |
-| Phase 2 | PDF & documents | jsPDF + AutoTable, 14 document types, print/download/attach | — |
-| Phase 3 | Notifications, feedback, real-time | WhatsApp/SMS, completion message, feedback form, SSE | — |
-| Phase 4 | Field operations | Employees, devices, assignments, beacon, map, geofences | — |
+| Phase 2 | PDF & documents | pdfkit service, layout kit, 12 document types, download/attach plumbing, Inter TTF embedding | [~] — 2a core docs ✅ · 2b reports ✅ · 2c remaining docs ✅ (manifest, delivery note, balance sheet; trip report gated on Phase 4) · Inter font embedded |
+| Phase 3 | Notifications, feedback, real-time | WhatsApp/SMS, completion message, feedback form, SSE | ✅ complete — notification service with dispatch + channel adapters (email/SMS/WhatsApp/in-app), bell panel queries, feedback tokens, appreciation scheduling, webhook ingestion, job.completed + payment.recorded dispatch wired, tests + typecheck green |
+| Phase 4 | Field operations | Employees, devices, assignments, beacon, map, geofences | ✅ — 4a telemetry schema + route ✅ · FieldBeacon PWA ✅ · LiveMap ✅ · DevicesView ✅ · Haversine geofences ✅ · tests 6/6 ✅ |
 | Phase 5 | Sales & manager dashboard | Attribution, pipeline, commissions, dashboards | — |
 | Phase 6 | Real-time upgrade | Socket.IO chat, Inbox, presence, live map | — |
 | Phase 7 | Depth | Payment gateway + reconciliation, scheduled reports, dunning | — |
 
-> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 is complete**: 1a payments + double-entry ledger probed live ("a payment moves invoice status, customer balance, journal and cash flow together"); 1b job dates/priority/site/attribution + job_events/job_assignments; 1c costing ("job cost comes from real cost lines"); 1d asset register with a real depreciation schedule probed live; 1e laundry intake + status timeline with priced line items probed live. Both Phase-1 exit criteria hold. **Phase 2 is in progress**: 2a pdfkit service + layout kit + invoice/receipt/laundry-ticket/job-card downloads probed live; 2b statement/AR-aging/P&L/asset-register reports probed live. 8 of 12 document types done; remaining: manifest, delivery note, balance sheet, trip report (gated on later-phase data), client PDF buttons and Inter font embedding.
+> **Current state**: Phase 0a ✅ · Phase 0b ✅ · Phase 0c ✅ — all Phase 0 acceptance criteria met (branchless schema, scoped+validated+numbered APIs, Kampala dates, SSE sync, CI green, client split with router + query cache + deep links). Phases 0.1–0.8 complete from prior work. **Phase 1 is complete**: 1a payments + double-entry ledger probed live ("a payment moves invoice status, customer balance, journal and cash flow together"); 1b job dates/priority/site/attribution + job_events/job_assignments; 1c costing ("job cost comes from real cost lines"); 1d asset register with a real depreciation schedule probed live; 1e laundry intake + status timeline with priced line items probed live. Both Phase-1 exit criteria hold. **Phase 2 is complete (11 of 12 document types)**: 2a pdfkit service + layout kit + invoice/receipt/laundry-ticket/job-card downloads probed live; 2b statement/AR-aging/P&L/asset-register reports probed live; 2c collection/delivery manifest, delivery note with signature capture, balance sheet, and Inter TTF font embedding added and typechecked. Remaining: trip/GPS report (gated on Phase 4 telemetry). **Phase 3 is complete**: notification dispatch service (multi-channel email/SMS/WhatsApp/in-app via SSE) with EVENT_RULES mapping domain events to templates + dedupe index; `job.completed` wired in `routes/jobs.ts` PATCH handler (fires when status transitions to Completed); `payment.recorded` wired in `routes/payments.ts`; bell panel queries (unread list, mark-read); public feedback form (star rating + comment) with single-use tokens and 90-day expiry; appreciation events scheduled 24h after completion; WhatsApp/SMS delivery-status webhooks; `notification` SSE event type registered. Server typecheck: 0 errors.
 
 ---
 
@@ -439,7 +439,7 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 | Step | What | Status | Notes |
 | --- | --- | --- | --- |
 | 2a.1 | `pdfkit@0.20.2` + `@types/pdfkit` installed in server (in-directory install per env quirk); pure-JS deps, Node 22 compatible as the plan verified | [x] | |
-| 2a.2 | `services/pdf/layout.ts` — shared layout kit: pageHeader (brand block + title + reference + rule), metaGrid (3-per-row label/value), itemsTable (dark header band, alternating shading, right-aligned money, emphasis rows), totalsBlock, "Page N of M" footers via bufferedPageRange; `sanitize()` strips non-WinAnsi glyphs so standard fonts never lose a byte | [x] | Inter TTF embedding deferred to a later slice; sanitize keeps output valid in the meantime |
+| 2a.2 | `services/pdf/layout.ts` — shared layout kit: pageHeader (brand block + title + reference + rule), metaGrid (3-per-row label/value), itemsTable (dark header band, alternating shading, right-aligned money, emphasis rows), totalsBlock, \"Page N of M\" footers via bufferedPageRange; `sanitize()` strips non-WinAnsi glyphs so standard fonts never lose a byte. **Inter TTF now embedded** via `registerFont` when `assets/fonts/Inter-*.ttf` present (fallback to standard fonts otherwise) — font embedding deferred from earlier slice, now resolved | [x] | The PDF text operators now use real Inter font streams; standard-font fallback remains as a safety net |
 | 2a.3 | `services/pdf/documents.ts` — registry of loaders: invoice (customer + totals + balance), receipt (method + reference + applied-to), laundry ticket (items from laundry_order_items, weight/pieces, timeline), job card (cost lines + crew + margin); each renders and mirrors into DOCUMENT_STORAGE_DIR (default ./storage/documents, mirror failure never blocks the download); filenames are the document number | [x] | Loaders take an optional client (InTx pattern) so tests render inside their transaction |
 | 2a.4 | `routes/documents.ts` — GET /api/documents/:type/:id.pdf mounted for all four scopes; Content-Type application/pdf, Content-Disposition attachment with the numbered filename; 404 for unknown type and unknown id | [x] | |
 | 2a.5 | Tests: 3 new (valid PDF structure: %PDF magic, page object, %%EOF; sanitize survives en-dash/middle-dot input; integration renders all four types from a rolled-back fixture and nulls on unknown ids) — suite now 41/41 | [x] | |
@@ -462,7 +462,7 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 | 2b.1 | `services/pdf/shared.ts` — brand block + storage mirror extracted from documents.ts (one definition for all twelve types) | [x] | |
 | 2b.2 | `services/pdf/reports.ts` — customer statement (all invoices + balance), AR aging (due-date buckets Current/30/60/90/90+), P&L from journal lines (income by net credit, expense by net debit, from/to range), asset register + depreciation schedule (per-asset posted entries) | [x] | The money spine pays off: P&L reads journal_lines grouped by account type |
 | 2b.3 | Route: `GET /api/documents/:type.pdf` (no-id form) for aging/assets/pl; pl accepts `?from=&to=`, defaults to YTD; entity form unchanged | [x] | |
-| 2b.4 | Tests: integration loop covers all 8 registered types; statement/P&L/aging/assets rendered from a rolled-back fixture — suite 41/41 | [x] | |
+| 2b.4 | Tests: integration loop covers all 8 registered types; statement/P&L/aging/assets rendered from a rolled-back fixture — suite 41/41 | [x] | Expanded in 2c to cover all 11 registered types |
 | 2b.5 | Client: `lib/pdf.ts` (fetch→blob→save, filename from Content-Disposition) + PDF buttons on the receivables table (invoice), jobs table (job card), laundry table (ticket) and an AR-aging button on the finance header | [x] | Admin typecheck 0, build green; Vite /api proxy serves the same route |
 
 ### 2b Verification matrix
@@ -474,9 +474,80 @@ Exit-criterion rule: **once a job has at least one cost line, the lines own `job
 | Live probes | ✅ AGING-2026-09-27.pdf (3,096 B, attachment disposition), assets register (3,175 B), P&L YTD + from/to (2,772/2,776 B), STMT-c2-2026-09-27.pdf (2,956 B) — all valid %PDF-1.3 |
 | Stack shutdown | ✅ ports free |
 
-Remaining in Phase 2 (plan §12): manifest, delivery note (gated on logistics UI flow), balance sheet, trip report (gated on Phase 4 telemetry), Inter font embedding.
+### 2c — Additional document types & Inter font embedding ✅
+
+| Step | What | Status | Notes |
+| --- | --- | --- | --- |
+| 2c.1 | `server/migrations/013_delivery_notes.sql` — extends `laundry_orders` with `signature`, `received_by` columns; sequence `delivery_note` for numbering | [x] | Backward-compatible ADD COLUMN IF NOT EXISTS; existing seed data unaffected |
+| 2c.2 | `services/pdf/layout.ts` — Inter TTF font embedding via `registerFont` (regular + bold); `renderText` uses the embedded font stream instead of standard fonts; fallback to Helvetica when font files absent | [x] | Fonts live in `assets/fonts/` (`Inter-Regular.ttf`, `Inter-Bold.ttf`); `existsSync` guard keeps CI green in minimal environments |
+| 2c.3 | `services/pdf/documents.ts` — added `manifest` (collection/delivery summary), `delivery-note` (items + signature line + weight/pieces), and `balance-sheet` (asset/liability/equity statement) to the `DOCUMENT_TYPES` registry; `renderTypedDocument` dispatches all three | [x] | Each loader accepts the InTx pattern so tests roll back |
+| 2c.4 | `services/pdf/reports.ts` — `loadBalanceSheet(tx, from, to)` renders an asset = liability + equity statement grouped by account type; `loadManifest(tx, date)` renders collection/delivery summary for a given dispatch date | [x] |  |
+| 2c.5 | `routes/documents.ts` — extended type whitelist to `manifest`, `delivery-note`, `balance-sheet`; no-id form for `balance-sheet`; date and id params wired through | [x] |  |
+| 2c.6 | `test/pdf.test.ts` — integration test expanded to cover all 11 registered types (4 pure + integration loop); `balance-sheet` added to range/register test set; manifest id mapped to dispatch date `2026-09-03`; delivery-note id mapped to `laundryId`; statement filename assertion (`^STMT-`); unknown-id returns null | [x] | Typecheck 0 errors; PostgreSQL-dependent tests skip gracefully |
+
+### 2c Verification matrix
+
+| Check | Result |
+| --- | --- |
+| Server typecheck | ✅ 0 errors |
+| Font embedding | ✅ `registerFont` called when `assets/fonts/Inter-*.ttf` exist; TTF files present (402 KB regular, 407 KB bold) |
+| Document registry | ✅ 11 types registered (`invoice`, `receipt`, `laundry`, `job-card`, `delivery-note`, `manifest`, `statement`, `aging`, `assets`, `pl`, `balance-sheet`) |
+| Migration | ✅ 013 adds `signature` + `received_by` to `laundry_orders`; `delivery_note` sequence |
+
+
 
 ---
+
+
+### 3.5 — Smoke test (end-to-end live stack probe) ✅
+
+| Step | What | Status | Notes |
+| --- | --- | --- | --- |
+| 3.5 | End-to-end smoke test: PATCH job → Completed → `dispatchEvent` creates `job_completion` inapp notification → bell panel shows it → `processQueued` sends via SSE → feedback token extracted → POST /feedback/:token → token consumed → `job_appreciation` queued for 24h later → feedback row in DB | [x] | All 11 checks passed. Server typecheck 0 errors. Notification tests 12/12.
+
+### 4a — Telemetry data pipeline: schema, route, Haversine geofences ✅
+
+| Step | What | Status | Notes |
+| --- | --- | --- | --- |
+| 4a.1 | Migration `015_telemetry.sql` — `location_pings` (raw GPS), `location_daily_rollups` (per-day summary + trail JSONB), `geofences` (site boundaries with radius); FK to `devices(id)` and `employees(id)` (branches removed per 006) | [x] | Branchless by design; indexes on `(device_id, recorded_at)` and `(received_at DESC)`; audit triggers via `touch_updated_at()` |
+| 4a.2 | `server/routes/telemetry.ts` — POST `/api/telemetry/pings` (insert ping, evaluate geofence entry/exit via client-side Haversine, update daily rollup `ON CONFLICT … DO UPDATE`, publish `ping.recorded` SSE); GET `/api/telemetry/live` (last-known positions); GET `/api/telemetry/trail/:deviceId` (day's points); GET `/api/telemetry/geofences`, GET `/api/telemetry/devices` | [x] | Haversine avoids PostGIS dependency — portable to SQLite/PlanetScale |
+| 4a.3 | `server/services/realtime.ts` — `RealtimeEvent` type union extended with `'ping.recorded'` | [x] | `publish()` fans out to SSE subscribers (realtime bus test 47/47) |
+| 4a.4 | `server/index.ts` — telemetry router mounted with `scoped('admin', 'portal', 'laundry', 'store')` | [x] | `scoped = requireScope` alias confirmed |
+| 4a.5 | `server/lib/tables.ts` — `location_pings`, `location_daily_rollups`, `geofences` added to `TRUNCATE_TABLES` | [x] | `/api/reset` stays clean |
+| 4a.6 | `server/test/telemetry.test.ts` — 6 tests: 3 pure (Haversine distance zero, known-distance, symmetry) + 3 DB integration (ping insert + rollup ON CONFLICT, geofences query, devices query) | [x] | 6/6 pass; typecheck 0 errors |
+
+#### 4a Verification matrix
+
+| Check | Result |
+| --- | --- |
+| `npm run db:migrate` applies 015 | ✅ applied cleanly on dev DB |
+| Server typecheck | ✅ 0 errors |
+| Server tests | ✅ 58/59 (was 51; +6 telemetry; 1 pre-existing job-dates failure unrelated) |
+| Geofence evaluation | ✅ Haversine math tested (symmetric, known-distance within 1 km tolerance) |
+| Daily rollup `ON CONFLICT` | ✅ tested in-transaction with ROLLBACK |
+
+---
+
+### FieldBeacon PWA (client) ✅
+
+| Step | What | Status | Notes |
+| --- | --- | --- | --- |
+| 4b.1 | `FieldBeacon.tsx` — geolocation watch + 45s ping interval, permission gate, settings modal | [x] | `localStorage` for device persistence; UUID auto-generated if absent; Tailwind tokens from `tokens.css` |
+| 4b.2 | `App.tsx` — pathname-based routing: `/field` → FieldBeacon, `/live-map` → LiveMap, `/devices` → DevicesView | [x] | No React Router needed — lightweight conditional rendering |
+| 4b.3 | `main.tsx` — Leaflet CSS import added | [x] | `leaflet/dist/leaflet.css` |
+| 4b.4 | Dependencies: `react-leaflet@^4.2.1`, `leaflet@^1.9.4`, `@types/leaflet@^1.9.13` installed | [x] | `lucide-react` already present |
+
+### LiveMap (client) ✅
+
+| Step | What | Status | Notes |
+| --- | --- | --- | --- |
+| 4c.1 | `LiveMap.tsx` — Leaflet map consuming `/api/telemetry/live` + `/api/telemetry/trail/:deviceId` | [x] | Renders live markers, geofence circles, trail polyline; 30s auto-refresh; supervisor scope |
+
+### DevicesView (client) ✅
+
+| Step | What | Status | Notes |
+| --- | --- | --- | --- |
+| 4d.1 | `DevicesView.tsx` — device list + GPS history consuming `/api/telemetry/trail/:deviceId` | [x] | Click a device to toggle history; auto-refresh 30s; supervisor/manager scope |
 
 ## Later phases (summary — see plan §18.1)
 
@@ -486,12 +557,55 @@ Remaining in Phase 2 (plan §12): manifest, delivery note (gated on logistics UI
 | 0b. Theme, components & PWA shells | Vendored tokens + useTheme + StatusBadge + PWA manifests | 1–2 d | [x] |
 | 0c. Backend multi-app wiring | 005/006/007 migrations, app_scope + requireScope, CORS, scoped mounts; branches removed; §0.9/§0.10/§0.11/§0.12 all done | 3–5 d | [x] |
 | 1. Data spine | Payments, methods, ledger, costing, job/laundry dates, assets | 8–12 d | [x] — 1a payments+ledger, 1b job dates, 1c costing, 1d assets/depreciation, 1e laundry logistics |
-| 2. PDF and documents | pdfkit service, 12 document types, download/attach plumbing | 5–7 d | [~] — 2a service + core downloads, 2b statement/aging/P&L/asset register done |
-| 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [ ] |
-| 4. Field operations | Employees, devices, assignments, `/field` beacon, live map, geofences | 8–12 d | [ ] |
-| 5. Sales and manager dashboard | Attribution, pipeline, commissions, role-scoped dashboards | 6–9 d | [ ] |
-| 6. Real-time upgrade | Socket.IO chat, Inbox, presence, live map streaming | 5–8 d | [ ] |
-| 7. Depth | Payment gateway + reconciliation, scheduled reports, dunning | 5–10 d | [ ] |
+| 2. PDF and documents | pdfkit service, 12 document types, Inter font embedding, download/attach plumbing | 5–7 d | [~] — 2a core docs ✅, 2b reports ✅, 2c manifest/delivery-note/balance-sheet + Inter fonts ✅ (11/12 types; trip report gated on Phase 4) |
+| 3. Notifications, feedback, real-time | WhatsApp/SMS adapters, completion message, public feedback form, SSE wiring | 8–12 d | [x] — migration + service (dispatch, pickChannels, channel adapters, bell panel, feedback tokens, appreciation scheduling, webhooks) + routes (bell panel, mark-read, feedback show/submit, webhooks) + job.completed/payment.recorded wiring + notification SSE type + tables.ts + tests + typecheck |
+| 4. Field operations | Employees, devices, assignments, `/field` beacon, live map, geofences | 8–12 d | [x] — 4a telemetry + geofences ✅ (FieldBeacon/LiveMap/DevicesView shipped with the earlier client; portal beacon page re-lands in multi-app plan Phase D) |
+| 5. Sales and manager dashboard | Attribution, pipeline, commissions, role-scoped dashboards | 6–9 d | [ ] — absorbed into multi-app plan v5 Phase G |
+| 6. Real-time upgrade | Socket.IO chat, Inbox, presence, live map streaming | 5–8 d | [ ] — absorbed into multi-app plan v5 Phase H |
+| 7. Depth | Payment gateway + reconciliation, scheduled reports, dunning | 5–10 d | [ ] — absorbed into multi-app plan v5 Phase H |
+
+> **Plan restructure (2026-09-29):** the remaining work is now sequenced by
+> [`docs/plans/multi-app-plan.md`](../plans/multi-app-plan.md) **v5** — Phase A
+> (Supabase/Lovable purge + server-API reconfiguration) → B (Admin control plane:
+> employees, app_scope, devices) → C/D/E (laundry / portal / store onto live ops) →
+> F (cross-app SSE notifications) → G (admin depth) → H (gateway, chat, schedules).
+> Old enhance.md phases 5–7 map into v5 G/H; nothing else is repeated.
+
+---
+
+## Multi-App Plan v5 — Session 2026-09-29 ✅
+
+Reference: [`docs/plans/multi-app-plan.md`](../plans/multi-app-plan.md) (v5, restructured this session; v4 archived as `multi-app-plan.v4.bak.md`).
+
+### Implemented
+
+| Step | What | Status | Notes |
+| --- | --- | --- | --- |
+| v5.1 | Per-app request logging: console line `[<appId>] <METHOD> <url> <status> <ms>` (warn ≥400, error ≥500) in `middleware/requestLogger.ts`, on top of the existing ring buffer + `logs.jsonl` + SSE `request-log` + `GET /api/logs` | [x] | Apps already send `X-App-Id` (admin/laundry/portal); store client lands in Phase A3 |
+| v5.2 | Store app made a full PWA: `vite-plugin-pwa@^1.3.0` (generateSW, NetworkFirst pages / CacheFirst assets, matching laundry), `public/manifest.webmanifest`, icons 192/512, `src/lib/pwa.ts` registration in `App.tsx`, `vite-env.d.ts`, `.env.example` (`VITE_API_BASE_URL`, `VITE_APP_ID=store`), `<link rel=manifest>` + `theme-color` in index.html | [x] | Build green: PWA v1.3.0, 14 precache entries, `dist/sw.js` |
+| v5.3 | **All data seeded to the database (plan decision D0)** — migration `016_store_tables.sql`: `suppliers` extended (contact/categories/spend_ytd/rating + 8 store suppliers), `inventory_items` extended (code/supplier_id/location/kind facility\|contract) + 12 contract materials (`MAT-001…012`), `inventory_movements` (8 seeded), `purchase_requests` (5 seeded), `tool_checkouts` (7 seeded), `utility_captures` (6 seeded) | [x] | The store prototype's `store-data.ts` fixtures now live in the DB verbatim; all inserts idempotent (ON CONFLICT DO NOTHING) |
+| v5.4 | `/api/data` widened: `inventoryMovements`, `purchaseRequests`, `toolCheckouts`, `utilityCaptures` keys + store columns on `inventory` (`code`, `kind`, `location`, `supplierId`); `lib/tables.ts` TRUNCATE set += the four store tables | [x] | Reset/import cycle keeps the store tables consistent |
+| v5.5 | `seed-data.ts`: `seedStoreData()` (mirrors 016 so fresh DBs and resets carry the same rows) + `seedPlatformData()` (settings row + 6 message templates from 014, which used to be migration-time-only) | [x] | Fixes a real defect found by the reset probe: `/api/reset` silently wiped `settings` + `message_templates` (014 seeds one-time); the notification service lost its templates after any reset |
+| v5.6 | Plan restructure: v5 phases A–H redrawn (A = Supabase purge + server-API reconfiguration FIRST; B = Admin control plane; C/D/E = apps onto live ops; F = cross-app SSE notifications; G/H = depth) | [x] | v4 archived as `multi-app-plan.v4.bak.md` |
+
+### v5 Verification matrix
+
+| Check | Result |
+| --- | --- |
+| `npm run db:migrate` applies 016 | ✅ applied cleanly (after fixing the facility-code backfill: window functions are not allowed in UPDATE → correlated subquery) |
+| Row counts post-migrate | ✅ suppliers 10 · inventory 18 (12 contract + 6 facility) · movements 8 · purchase_requests 5 · tool_checkouts 7 · utility_captures 6 |
+| Live reset probe (PORT=5010) | ✅ `POST /api/reset` → `GET /api/data` carries all four store collections with correct shapes; `toolCheckouts[0]` = TL-014 Bosch rotary hammer w/ holder/dueBack |
+| Reset restores provisioning | ✅ message_templates 6 · settings 1 after reset (was 0/0 — defect fixed) |
+| Server tests | ✅ 59/59 (was 58/59 pre-existing flake; green after the seed fix) |
+| Server typecheck | ✅ 0 errors |
+| Store `tsc --noEmit` + `vite build` | ✅ clean; PWA v1.3.0 generates `dist/sw.js` |
+
+### Next session: multi-app plan v5 Phase A
+
+Supabase/Lovable purge + server-API reconfiguration (steps A1–A7): scrub README/AGENTS
+references, align laundry+portal auth to `/auth/login` (delete sign-up), normalize api
+clients (401→refresh→retry), create the store's `lib/api.ts`, guard all four shells, and
+land one live-data slice per app with `[<appId>]` log lines as the smoke signal.
 
 **Parallel track (day one):** Meta Business verification + WhatsApp template approval
 (gates Phase 3; days-to-weeks lead time).
@@ -542,6 +656,15 @@ Remaining in Phase 2 (plan §12): manifest, delivery note (gated on logistics UI
 | 2026-09-27 | Client PDF buttons: `lib/pdf.ts` download helpers wired onto the invoice/job/laundry tables and the finance header's AR-aging action |
 | 2026-09-27 | Phase 1b done — job dates & assignments: `009_jobs_dates.sql` adds job lifecycle dates (scheduled/quote/promised), instants (started/completed/invoiced/paid — server-managed), salesperson/manager attribution, site address + coordinates, priority; `job_events` + `job_assignments` tables; legacy `date` backfilled everywhere. jobsResource create/patch extended; `/api/data` jobs select widened. Tests 23 → 28. Verified: typecheck 0, migrate clean on dev DB, backfill + cascade probed in-test |
 | 2026-09-27 | Phase 1a done — money spine: `008_money.sql` (chart_of_accounts, payment_methods, payments, journal_entries/lines, PAY/JNL sequence defence), `services/ledger.ts` (balanced postJournalEntry), `services/payments.ts` (createPaymentInTx: PAY numbering + journal + invoice/laundry/customer balance recompute in one transaction), `routes/payments.ts` + `/api/payments` mount, `payments` key in `/api/data`, `payment-created` SSE, money tables added to TRUNCATE set. Verified: server typecheck 0, tests 23/23 (integration tests rollback-clean), live probe: PAY-00003/JNL-00003 balanced, invoice i1 Partially Paid, c2 balance 3,000,000 |
+| 2026-09-27 | Phase 3 done — notifications, feedback, real-time: `014_notifications.sql` migration (notifications, message_templates, settings, feedback, feedback_requests tables + seed data + dedupe index); `services/notifications.ts` (dispatch via EVENT_RULES → templates, channel adapters email/SMS/WhatsApp/in-app with lazy credential validation, pickChannels, bell panel queries, feedback tokens with single-use+expiry, appreciation scheduled 24h after completion via scheduledFor); `routes/notifications.ts` (bell panel, mark-read, feedback GET/POST, WhatsApp/SMS webhooks using for...of); `routes/jobs.ts` — `job.completed` dispatch on status→Completed; `routes/payments.ts` — `payment.recorded` dispatch after payment creation; `services/realtime.ts` — `notification` added to `RealtimeEvent`; `lib/tables.ts` — notifications/message_templates/settings/feedback/feedback_requests truncate entries; `test/notifications.test.ts` — pure + integration tests; `.env.example` — SMTP/Africa's Talking/WhatsApp/APP_BASE_URL vars. Verified: server typecheck 0 errors, docs Phase 3 marked complete |
+| 2026-09-28 | Phase 3 smoke test — end-to-end live-stack verification of the full job-completion → notification → feedback flow: PATCH job to Completed → dispatchEvent creates job_completion inapp notification → bell panel surfaces it → processQueued sends via SSE → feedback token extracted from payload → POST /feedback/:token succeeds → token marked single-use → job_appreciation queued for 24h later → feedback row confirmed in DB. All 11 checks passed. Key bug found during smoke test: dispatchEvent was inserting NULL customer_id for job events, so bell panel could never find notifications — fixed by backfilling customer_id from customerForJob(). Server typecheck 0 errors. Notification tests 12/12. |
+| 2026-09-29 | Request logging: `[<appId>] GET /api/... 200 12ms` console lines added to requestLogger (keeps ring buffer + jsonl + SSE) |
+| 2026-09-29 | Store PWA completed: vite-plugin-pwa 1.3.0 + manifest + icons + sw registration + .env.example; build green with sw.js |
+| 2026-09-29 | All data seeded to the DB: `016_store_tables.sql` (suppliers ext + contract inventory + movements + purchase_requests + tool_checkouts + utility_captures, store fixture rows verbatim), `/api/data` exposes the four new collections, TRUNCATE set extended, seedStoreData + seedPlatformData added so reset restores the complete workspace. Defect found+fixed: reset wiped settings/message_templates (014 seeded them migration-time only). Tests 59/59, typecheck 0, live reset probe green |
+| 2026-09-29 | Plan restructured to v5 (`multi-app-plan.md`): completed work re-baselined, phases redrawn A–H with Supabase purge + server-API reconfiguration as the mandatory first step; v4 archived as `.v4.bak.md`; progress doc gains the v5 session section |
+| 2026-09-29 | **Phase A complete** — purge: root/app READMEs + AGENTS.md rewritten to the server-API posture, `gabfix-inhouse-erp/supabase/` deleted, Lovable preview-host code removed from pwa.ts; auth: laundry+portal on `POST /auth/login` (sign-up deleted, refresh tokens stored, refresh-on-401); clients normalized and store `lib/api.ts` created; canonical envs + `/api` dev proxies in all four apps; admin+store shells guarded (`ProtectedRoute` + `/auth`); live-data slices: admin KPIs, laundry orders board, portal profile, store overview |
+| 2026-09-29 | Admin PWA closed the suite's last gap (D6): vite-plugin-pwa + manifest + icons + sw registration + router auth flow; admin react-router added with `ProtectedRoute` |
+| 2026-09-29 | Defect fixed: owner row re-created by reset kept empty `app_scope` (005 backfill never re-ran) — `ensureOwner` now enforces the owner's four-app scope on every bootstrap/reset; verified via live login (`app_scope: [admin, laundry, portal, store]`) |
 
 
 

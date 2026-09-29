@@ -6,9 +6,11 @@ import { fail } from '../lib/http';
 /**
  * Document downloads (Phase 2, plan §12). Two shapes:
  *   GET /api/documents/:type/:id.pdf  — entity documents (invoice, receipt,
- *                                       laundry, job-card, statement)
+ *                                       laundry, job-card, statement,
+ *                                       delivery-note, manifest)
  *   GET /api/documents/:type.pdf      — range/register documents (aging,
- *                                       assets, pl with optional ?from=&to=)
+ *                                       assets, pl, balance-sheet with
+ *                                       optional ?from=&to=)
  * Responses carry Content-Disposition attachment with the numbered filename
  * so "Save as" defaults to INV-00098.pdf; every render is mirrored into
  * DOCUMENT_STORAGE_DIR by the service so messaging can attach the same

@@ -16,8 +16,12 @@ import { laundryRouter } from './routes/laundry';
 import { documentsRouter } from './routes/documents';
 import { servicesRouter } from './routes/services';
 import { eventsRouter } from './routes/events';
+import { logsRouter } from './routes/logs';
 import { workspaceRouter } from './routes/workspace';
+import { notificationsRouter } from './routes/notifications';
+import { telemetryRouter } from './routes/telemetry';
 import { guard, requireScope } from './middleware/auth';
+import { requestLogger } from './middleware/requestLogger';
 
 // Multi-app CORS (multi-app-plan §10.3): the four Vercel apps plus local dev
 // ports 5173–5179. Vite serves on IPv6 localhost in dev, hence the ::1 forms.
@@ -45,6 +49,10 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+
+// Request logger: capture every request after it completes, store in ring
+// buffer, and publish to SSE subscribers so the admin console gets a live feed.
+app.use(requestLogger());
 
 // Health stays unauthenticated (also exempted inside guard()).
 app.get('/api/health', (_req, res) => {
@@ -77,7 +85,15 @@ app.use('/api/expenses', scoped('admin', 'laundry', 'store', 'portal'), expenses
 app.use('/api/services', scoped('admin', 'laundry', 'store', 'portal'), servicesRouter);
 app.use('/api/inventory', scoped('admin', 'laundry', 'store'), inventoryRouter);
 app.use('/api/events', eventsRouter); // SSE stream (Phase 0.11)
+app.use('/api/logs', logsRouter);     // GET /api/logs — request log history (admin)
 app.use('/api', adminRouter); // POST /api/import, POST /api/reset (owner-only inside)
+
+// Notification routes (Phase 3): bell panel + public feedback form + webhooks.
+// Feedback form is public (no auth); bell-panel reads are guarded by /api guard.
+app.use('/api', scoped('admin', 'portal', 'laundry', 'store'), notificationsRouter);
+app.use('/api', scoped('admin', 'portal', 'laundry', 'store'), telemetryRouter);
+// Feedback links are shared via email/WhatsApp — mount public routes outside guard.
+app.use('/', notificationsRouter);
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 

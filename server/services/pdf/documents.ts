@@ -6,6 +6,8 @@ import { kampalaToday } from '../../lib/dates';
 import {
   loadAging,
   loadAssetRegister,
+  loadBalanceSheet,
+  loadManifest,
   loadProfitAndLoss,
   loadStatement,
 } from './reports';
@@ -28,7 +30,10 @@ export type DocumentType =
   | 'statement'
   | 'aging'
   | 'pl'
-  | 'assets';
+  | 'assets'
+  | 'manifest'
+  | 'delivery-note'
+  | 'balance-sheet';
 
 export type { RenderedDocument };
 
@@ -255,12 +260,77 @@ async function loadJobCard(client: PoolClient, id: string): Promise<RenderedDocu
   const buffer = await renderDocument(input);
   const filename = `${job.number}.pdf`;
   mirror(filename, buffer);
+    return { buffer, filename };
+}
+
+async function loadDeliveryNote(client: PoolClient, id: string): Promise<RenderedDocument | null> {
+  const { rows } = await client.query<{
+    id: string; number: string; status: string; total: number; paid: number;
+    received: Date; items: string;
+    weight_kg: number; pieces: number;
+    customer_name: string; customer_phone: string;
+    signature: string | null; received_by: string | null;
+  }>(
+        `SELECT l.id, l.number, l.status, l.total::float8 AS total, l.paid::float8 AS paid,
+            l.received, l.items, l.weight_kg::float8 AS weight_kg, l.pieces,
+            c.name AS customer_name, c.phone AS customer_phone,
+            l.signature, l.received_by
+     FROM laundry_orders l JOIN customers c ON c.id = l.customer_id WHERE l.id = $1`,
+    [id],
+  );
+  if (!rows.length) return null;
+  const order = rows[0];
+  const items = await client.query<{ description: string; qty: number; unit: string; unit_price: number; amount: number }>(
+        `SELECT description, qty::float8 AS qty, unit, unit_price::float8 AS unit_price, amount::float8 AS amount
+     FROM laundry_order_items WHERE order_id = $1 ORDER BY id`,
+    [id],
+  );
+
+  const itemRows: ItemRow[] = items.rows.length
+    ? items.rows.map((item) => ({
+        cells: [item.description || 'Laundry item', `${item.qty} ${item.unit} @ ${money(item.unit_price)}`],
+        amount: item.amount,
+      }))
+    : [{ cells: [order.items || 'Laundry services'], amount: order.total }];
+
+  const input: DocumentInput = {
+    title: 'DELIVERY NOTE',
+    reference: order.number,
+    brand,
+    meta: [
+      { label: 'Order number', value: order.number },
+      { label: 'Date', value: dayText(order.received) },
+      { label: 'Status', value: order.status },
+      { label: 'Customer', value: order.customer_name },
+      { label: 'Phone', value: order.customer_phone || '-' },
+      { label: 'Received by', value: order.received_by || '—' },
+    ],
+    sections: [
+      {
+        heading: 'Items delivered',
+        columns: ['Description', 'Qty / Unit'],
+        rows: itemRows,
+      },
+    ],
+    totals: [
+      { label: 'Total', value: money(order.total) },
+      { label: 'Paid', value: money(order.paid) },
+      { label: 'Balance', value: money(order.total - order.paid), emphasis: true },
+    ],
+    footerNote: order.signature
+      ? `Signature on file. Received by: ${order.received_by || '—'}.`
+      : 'Signature: ________________   Received by: ________________',
+  };
+  const buffer = await renderDocument(input);
+  const filename = `DELIVERY-${order.number}.pdf`;
+  mirror(filename, buffer);
   return { buffer, filename };
 }
 
 /**
- * Entity loaders take an id (invoice number, customer id); range/register
- * loaders ignore it (aging, assets) or parse a from/to pair from it (pl).
+ * Entity loaders take an id (invoice number, customer id, laundry order id,
+ * or a date for manifest); range/register loaders ignore it (aging, assets)
+ * or parse a from/to pair from it (pl, balance-sheet).
  * The route passes null for the no-id forms.
  */
 const LOADERS: Record<DocumentType, (client: PoolClient, id: string | null) => Promise<RenderedDocument | null>> = {
@@ -268,7 +338,9 @@ const LOADERS: Record<DocumentType, (client: PoolClient, id: string | null) => P
   receipt: (client, id) => loadReceipt(client, id!),
   laundry: (client, id) => loadLaundryTicket(client, id!),
   'job-card': (client, id) => loadJobCard(client, id!),
+  'delivery-note': (client, id) => loadDeliveryNote(client, id!),
   statement: (client, id) => loadStatement(client, id!),
+  manifest: (client, id) => loadManifest(client, id!),
   aging: (client) => loadAging(client),
   assets: (client) => loadAssetRegister(client),
   pl: (client, id) => {
@@ -277,10 +349,16 @@ const LOADERS: Record<DocumentType, (client: PoolClient, id: string | null) => P
     const year = new Date().getFullYear();
     return loadProfitAndLoss(client, from || `${year}-01-01`, to || kampalaToday());
   },
+  'balance-sheet': (client, id) => {
+    // Optional "from/to" reference via ?from=&to= query; defaults to YTD.
+    const [from, to] = (id ?? '').split('/');
+    const year = new Date().getFullYear();
+    return loadBalanceSheet(client, from || `${year}-01-01`, to || kampalaToday());
+  },
 };
 
 /** Types that render without an entity id; the route rejects ids for them. */
-export const ID_LESS_TYPES: DocumentType[] = ['aging', 'assets', 'pl'];
+export const ID_LESS_TYPES: DocumentType[] = ['aging', 'assets', 'pl', 'balance-sheet'];
 
 export const DOCUMENT_TYPES = Object.keys(LOADERS) as DocumentType[];
 

@@ -10,4 +10,6 @@ import './jobs-dates.test.ts';
 import './costing.test.ts';
 import './assets.test.ts';
 import './laundry.test.ts';
-import './pdf.test.ts';
+  import './pdf.test.ts';
+import './notifications.test.ts';
+import './telemetry.test.ts';

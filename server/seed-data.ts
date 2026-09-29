@@ -13,7 +13,16 @@ export async function ensureOwner(client: ClientBase): Promise<void> {
   const existing = await client.query(
     `SELECT 1 FROM employees WHERE role = 'owner' AND deleted_at IS NULL LIMIT 1`,
   );
-  if (existing.rows.length) return;
+  if (existing.rows.length) {
+    // The owner is the control-plane apex: keep its app_scope covering all four
+    // apps even when the row was created before migration 005 (or its scope was
+    // reset alongside it). Mirrors the 005 backfill on every bootstrap/reset.
+    await client.query(
+      `UPDATE employees SET app_scope = ARRAY['admin','laundry','portal','store']::TEXT[]
+       WHERE role = 'owner' AND deleted_at IS NULL`,
+    );
+    return;
+  }
 
   const password = process.env.OWNER_PASSWORD || 'gabfix-owner';
   const pinHash = await bcrypt.hash(password, 10);
@@ -131,6 +140,134 @@ export async function seedData(client: ClientBase) {
       ('inv4', 'Microfiber cloths', 'Cleaning supplies', 'pack', 11, 15, 22000),
       ('inv5', 'Car shampoo', 'Detailing materials', 'litre', 36, 12, 18000),
       ('inv6', 'Plumbing fittings', 'Repair materials', 'box', 8, 5, 95000)
+     ON CONFLICT (id) DO NOTHING`
+  );
+
+  // Store (contract-division) dataset — mirrors migration 016. Reset truncates
+  // inventory_items (cascading to the store tables), so the seed restores the
+  // same rows a migrated database carries (same idempotent rule as the 009
+  // backfill replication above). Suppliers are master data and survive resets;
+  // on fresh databases migration 016 seeds them.
+  await seedStoreData(client);
+
+  // Platform provisioning from 014 — settings + message_templates are seeded by
+  // the migration only when it first runs, but /api/reset truncates both tables.
+  // Restore them here so a reset workspace stays fully provisioned.
+  await seedPlatformData(client);
+}
+
+/**
+ * Platform rows from migration 014: the single settings row and the six
+ * message templates (email/sms/inapp for job_completion + job_appreciation).
+ * Idempotent — on fresh databases 014 already inserted them.
+ */
+async function seedPlatformData(client: ClientBase) {
+  await client.query(
+    `INSERT INTO settings (id, company_name, company_tagline, company_phone)
+     VALUES (1, 'Gabfix', 'Cleaning, laundry and facility services', '+256 700 000 000')
+     ON CONFLICT (id) DO NOTHING`,
+  );
+
+  await client.query(
+    `INSERT INTO message_templates (key, channel, subject, body, variables, approved) VALUES
+      ('job_completion', 'email', 'Your service is complete',
+       '{{customer_name}}, your {{service_name}} on {{date}} has been completed by {{technician}}. Subtotal: {{total}}. Paid: {{paid}}. Balance: {{balance}}. Invoice: {{invoice_pdf_url}} Feedback: {{feedback_url}}',
+       ARRAY['customer_name','service_name','date','technician','total','paid','balance','invoice_pdf_url','feedback_url'], FALSE),
+      ('job_completion', 'sms', NULL,
+       '{{customer_name}}, {{service_name}} completed {{date}} by {{technician}}. Total {{total}}, paid {{paid}}, balance {{balance}}. Feedback: {{feedback_url}}',
+       ARRAY['customer_name','service_name','date','total','paid','balance','feedback_url'], FALSE),
+      ('job_appreciation', 'email', 'Thank you for choosing Gabfix',
+       '{{customer_name}}, we hope {{service_name}} on {{date}} met expectations. Your feedback helps us improve: {{feedback_url}}',
+       ARRAY['customer_name','service_name','date','feedback_url'], FALSE),
+      ('job_appreciation', 'sms', NULL,
+       'Thank you, {{customer_name}}! How was {{service_name}} on {{date}}? Rate us: {{feedback_url}}',
+       ARRAY['customer_name','service_name','date','feedback_url'], FALSE),
+      ('job_completion', 'inapp', NULL,
+       '{{customer_name}}, your {{service_name}} on {{date}} has been completed. Balance: {{balance}}. Feedback: {{feedback_url}}',
+       ARRAY['customer_name','service_name','date','balance','feedback_url'], TRUE),
+      ('job_appreciation', 'inapp', NULL,
+       'Thank you, {{customer_name}}! How was {{service_name}} on {{date}}? Rate us: {{feedback_url}}',
+       ARRAY['customer_name','service_name','date','feedback_url'], TRUE)
+     ON CONFLICT (key, channel) DO NOTHING`,
+  );
+}
+
+/**
+ * Store dataset (Phase E groundwork): contract materials, movements, purchase
+ * requests, tool checkouts and utility captures — the rows gabfix-store's
+ * prototype previously rendered from src/lib/store-data.ts. Idempotent.
+ */
+export async function seedStoreData(client: ClientBase) {
+  await client.query(
+    `INSERT INTO inventory_items (id, name, category, unit, quantity, minimum, cost, code, supplier_id, location, kind) VALUES
+      ('sinvm1',  'PVC pipe 1/2" x 3m',        'Plumbing',     'length', 148, 60, 12500,  'MAT-001', 'sup3',  'Rack A1',    'contract'),
+      ('sinvm2',  'Cement 50kg (Hima)',        'Masonry',      'bag',    24,  40, 34000,  'MAT-002', 'sup4',  'Floor bay 2','contract'),
+      ('sinvm3',  'Twin cable 2.5mm',          'Electrical',   'roll',   9,   20, 185000, 'MAT-003', 'sup5',  'Cage E',     'contract'),
+      ('sinvm4',  'Emulsion paint white 20L',  'Finishes',     'bucket', 31,  15, 145000, 'MAT-004', 'sup6',  'Rack C3',    'contract'),
+      ('sinvm5',  'Gypsum board 8x4',          'Ceilings',     'sheet',  0,   25, 52000,  'MAT-005', 'sup3',  'Rack B2',    'contract'),
+      ('sinvm6',  'Tile adhesive 20kg',        'Finishes',     'bag',    63,  30, 41000,  'MAT-006', 'sup7',  'Floor bay 1','contract'),
+      ('sinvm7',  'Conduit pipe 20mm',         'Electrical',   'length', 210, 80, 8500,   'MAT-007', 'sup5',  'Rack A4',    'contract'),
+      ('sinvm8',  'Mixer tap chrome',          'Plumbing',     'piece',  14,  12, 96000,  'MAT-008', 'sup8',  'Cage P',     'contract'),
+      ('sinvm9',  'Silicone sealant',          'Consumables',  'tube',   5,   24, 18000,  'MAT-009', 'sup7',  'Shelf S1',   'contract'),
+      ('sinvm10', 'Sand (tipper share)',       'Masonry',      'm³',     18,  10, 62000,  'MAT-010', 'sup9',  'Yard',       'contract'),
+      ('sinvm11', 'Steel bar Y12',             'Masonry',      'bar',    76,  50, 48000,  'MAT-011', 'sup10', 'Yard rack',  'contract'),
+      ('sinvm12', 'Door lockset',              'Carpentry',    'set',    22,  10, 78000,  'MAT-012', 'sup8',  'Cage P',     'contract')
+     ON CONFLICT (id) DO NOTHING`
+  );
+
+  // Facility items get codes too (016 does this for existing DBs; fresh DBs and
+  // resets get it here).
+  await client.query(
+    `UPDATE inventory_items SET code = 'FAC-' || LPAD((
+      SELECT COUNT(*)::text FROM inventory_items AS prior
+      WHERE prior.id <= inventory_items.id
+    )::text, 3, '0')
+     WHERE code IS NULL`,
+  );
+
+  await client.query(
+    `INSERT INTO inventory_movements (id, item_id, type, qty, reference, moved_on, by_name) VALUES
+      ('mv1', 'sinvm1',  'Issued',     -24, 'JOB-00184 · Ntinda villa',  '2026-09-28', 'Moses Okello'),
+      ('mv2', 'sinvm6',  'Received',    40, 'GRN-00421',                 '2026-09-28', 'Grace Atim'),
+      ('mv3', 'sinvm3',  'Issued',      -6, 'JOB-00179 · Kololo rewire', '2026-09-27', 'Diana Achieng'),
+      ('mv4', 'sinvm5',  'Issued',     -18, 'JOB-00180 · Bugolobi ceiling', '2026-09-27', 'John Kato'),
+      ('mv5', 'sinvm9',  'Adjustment',  -3, 'Stock count variance',      '2026-09-26', 'Grace Atim'),
+      ('mv6', 'sinvm11', 'Received',   100, 'GRN-00419',                 '2026-09-26', 'Grace Atim'),
+      ('mv7', 'sinvm4',  'Return',       4, 'JOB-00172 · Muyenga',       '2026-09-25', 'Moses Okello'),
+      ('mv8', 'sinvm2',  'Issued',     -30, 'JOB-00184 · Ntinda villa',  '2026-09-25', 'John Kato')
+     ON CONFLICT (id) DO NOTHING`
+  );
+
+  await client.query(
+    `INSERT INTO purchase_requests (id, item_id, description, qty, supplier_id, value, requested_by, requested_on, status) VALUES
+      ('pr1', 'sinvm5',  'Gypsum board 8x4',   60, 'sup3', 3120000, 'Grace Atim',   '2026-09-28', 'Pending approval'),
+      ('pr2', 'sinvm3',  'Twin cable 2.5mm',   20, 'sup5', 3700000, 'Grace Atim',   '2026-09-27', 'Pending approval'),
+      ('pr3', 'sinvm2',  'Cement 50kg (Hima)', 80, 'sup4', 2720000, 'John Kato',    '2026-09-26', 'Approved'),
+      ('pr4', 'sinvm9',  'Silicone sealant',   48, 'sup7', 864000,  'Grace Atim',   '2026-09-24', 'Draft'),
+      ('pr5', 'sinvm8',  'Mixer tap chrome',   10, 'sup8', 960000,  'Diana Achieng', '2026-09-22', 'Rejected')
+     ON CONFLICT (id) DO NOTHING`
+  );
+
+  await client.query(
+    `INSERT INTO tool_checkouts (id, code, name, condition, status, holder_name, job_label, due_back, notes) VALUES
+      ('t1', 'TL-014', 'Bosch rotary hammer',     'Good',         'Checked out', 'Moses Okello',  'JOB-00184 · Ntinda villa', '2026-09-29', 'New chisel set attached'),
+      ('t2', 'TL-021', 'Pipe threading machine',  'Fair',         'Overdue',     'John Kato',     'JOB-00180 · Bugolobi',     '2026-09-25', 'Oil top-up needed'),
+      ('t3', 'TL-002', 'Ladder 4m aluminium',     'Good',         'In store',    '',              '',                         NULL,         ''),
+      ('t4', 'TL-008', 'Angle grinder 5"',        'Needs repair', 'In repair',   '',              '',                         NULL,         'Switch faulty — at Nakawa workshop'),
+      ('t5', 'TL-031', 'Multimeter Fluke 117',    'Good',         'Checked out', 'Diana Achieng', 'JOB-00179 · Kololo rewire', '2026-09-30', ''),
+      ('t6', 'TL-005', 'Concrete mixer 350L',     'Fair',         'In store',    '',              '',                         NULL,         'Serviced 12 Sep'),
+      ('t7', 'TL-019', 'Tile cutter 900mm',       'Good',         'Checked out', 'Peter Ssali',   'JOB-00186 · Muyenga bath', '2026-10-02', '')
+     ON CONFLICT (id) DO NOTHING`
+  );
+
+  await client.query(
+    `INSERT INTO utility_captures (id, captured_on, type, reference, reading, amount, category_kind, captured_by, status) VALUES
+      ('u1', '2026-09-28', 'Fuel',        'Shell Ntinda · 441882',       '42.5 L',             236000, 'direct',     'Moses Okello', 'Quarantined'),
+      ('u2', '2026-09-27', 'Power',       'Yaka meter 0431 7719',        '1,284 → 1,412 kWh',  410000, 'operations', 'Grace Atim',   'Quarantined'),
+      ('u3', '2026-09-26', 'Water',       'NWSC acct 88213',             '214 → 231 m³',       128000, 'operations', 'Grace Atim',   'Approved'),
+      ('u4', '2026-09-25', 'Transport',   'Truck hire UBK 442H',         'Kololo run',         180000, 'direct',     'John Kato',    'Approved'),
+      ('u5', '2026-09-24', 'Maintenance', 'Grinder repair TL-008',       'Workshop slip 118',  95000,  'operations', 'Grace Atim',   'Quarantined'),
+      ('u6', '2026-09-22', 'Fuel',        'Total Kamwokya · 30219',      '31 L',               172000, 'direct',     'Diana Achieng', 'Rejected')
      ON CONFLICT (id) DO NOTHING`
   );
 }

@@ -25,13 +25,17 @@ export type AppData = {
   suppliers: unknown[];
   depreciationEntries: unknown[];
   laundryItems: unknown[];
+  inventoryMovements: unknown[];
+  purchaseRequests: unknown[];
+  toolCheckouts: unknown[];
+  utilityCaptures: unknown[];
 };
 
 const num = (value: unknown) => (value === null || value === undefined ? 0 : Number(value));
 
 /** Load the whole workspace from PostgreSQL, shaped exactly like the frontend AppData type. */
 export async function getData(): Promise<AppData> {
-  const [customers, services, jobs, invoices, expenses, laundry, equipment, inventory, payments, costCategories, suppliers, depreciationEntries, laundryItems] = await Promise.all([
+  const [customers, services, jobs, invoices, expenses, laundry, equipment, inventory, payments, costCategories, suppliers, depreciationEntries, laundryItems, inventoryMovements, purchaseRequests, toolCheckouts, utilityCaptures] = await Promise.all([
     pool.query(`SELECT id, name, company, type, phone, email, balance::float8 AS balance, status FROM customers ORDER BY id`),
     pool.query(`SELECT id, name, division, method, price::float8 AS price, active FROM services ORDER BY id`),
     pool.query(`SELECT id, number, customer_id AS "customerId", service_id AS "serviceId",
@@ -64,7 +68,8 @@ export async function getData(): Promise<AppData> {
                        custodian_employee_id AS "custodianEmployeeId"
                 FROM equipment ORDER BY id`),
     pool.query(`SELECT id, name, category, unit, quantity::float8 AS quantity, minimum::float8 AS minimum,
-                       cost::float8 AS cost
+                       cost::float8 AS cost, code, location, kind,
+                       supplier_id AS "supplierId"
                 FROM inventory_items ORDER BY id`),
     pool.query(`SELECT id, number, direction, customer_id AS "customerId", method_id AS "methodId",
                        amount::float8 AS amount, currency, reference, invoice_id AS "invoiceId",
@@ -73,7 +78,9 @@ export async function getData(): Promise<AppData> {
                 FROM payments WHERE deleted_at IS NULL ORDER BY received_at DESC, id DESC`),
     pool.query(`SELECT id, name, gl_account_code AS "glAccountCode", kind FROM cost_categories
                 WHERE deleted_at IS NULL ORDER BY name`),
-    pool.query(`SELECT id, name, phone, email, notes FROM suppliers WHERE deleted_at IS NULL ORDER BY name`),
+    pool.query(`SELECT id, name, phone, email, notes,
+                       contact, categories, spend_ytd::float8 AS "spendYtd", rating
+                FROM suppliers WHERE deleted_at IS NULL ORDER BY name`),
     pool.query(`SELECT id, equipment_id AS "equipmentId", period, amount::float8 AS amount,
                        accumulated::float8 AS accumulated, book_value::float8 AS "bookValue",
                        created_at::text AS "createdAt"
@@ -82,6 +89,23 @@ export async function getData(): Promise<AppData> {
                        qty::float8 AS qty, unit, unit_price::float8 AS "unitPrice",
                        amount::float8 AS amount
                 FROM laundry_order_items ORDER BY order_id, id`),
+    pool.query(`SELECT id, item_id AS "itemId", type, qty::float8 AS qty, reference,
+                       moved_on::text AS "movedOn", by_name AS "byName"
+                FROM inventory_movements ORDER BY moved_on DESC, id DESC`),
+    pool.query(`SELECT id, item_id AS "itemId", description, qty::float8 AS qty,
+                       supplier_id AS "supplierId", value::float8 AS value,
+                       requested_by AS "requestedBy", requested_on::text AS "requestedOn",
+                       status, decided_by AS "decidedBy", decided_on::text AS "decidedOn"
+                FROM purchase_requests ORDER BY requested_on DESC, id DESC`),
+    pool.query(`SELECT id, code, name, condition, status,
+                       holder_employee_id AS "holderEmployeeId", holder_name AS "holderName",
+                       job_id AS "jobId", job_label AS "jobLabel", due_back::text AS "dueBack", notes,
+                       equipment_id AS "equipmentId"
+                FROM tool_checkouts ORDER BY id`),
+    pool.query(`SELECT id, captured_on::text AS "capturedOn", type, reference, reading,
+                       amount::float8 AS amount, category_kind AS "categoryKind",
+                       captured_by AS "capturedBy", status, expense_id AS "expenseId"
+                FROM utility_captures ORDER BY captured_on DESC, id DESC`),
   ]);
 
   return {
@@ -98,5 +122,9 @@ export async function getData(): Promise<AppData> {
     suppliers: suppliers.rows,
     depreciationEntries: depreciationEntries.rows,
     laundryItems: laundryItems.rows,
+    inventoryMovements: inventoryMovements.rows,
+    purchaseRequests: purchaseRequests.rows,
+    toolCheckouts: toolCheckouts.rows,
+    utilityCaptures: utilityCaptures.rows,
   };
 }

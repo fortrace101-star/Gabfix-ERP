@@ -85,18 +85,28 @@ export function createHandler(resource: Resource, options: CreateOptions) {
 }
 
 /** PATCH handler: validates the patch, updates one row, 404s for an unknown id. */
-export function updateHandler(resource: Resource, options: { notFound: string; label: string }) {
+export function updateHandler(resource: Resource, options: {
+  notFound: string;
+  label: string;
+  afterUpdate?: (data: { id: string; body: Record<string, unknown> }) => Promise<void> | void;
+}) {
   return async (req: Request, res: Response) => {
     try {
       if (!resource.patch) throw new Error(`No update schema for ${resource.table}`);
       const parsed = parseBody(resource.patch, req.body) as Record<string, unknown>;
       // Express 5 types a route param as string | string[]; ids are never arrays.
-      const updated = await updateRecord(resource, String(req.params.id), parsed);
+      const id = String(req.params.id);
+      const updated = await updateRecord(resource, id, parsed);
       if (!updated) return res.status(404).json({ error: options.notFound });
       res.json({ ok: true });
 
       const type = eventTypeFor(resource, 'updated');
       if (type) publish({ type: type as never, by: req.user?.name });
+
+      // Phase-3 hook: dispatch domain events (e.g. job.completed → notifications).
+      if (options.afterUpdate) {
+        void options.afterUpdate({ id, body: parsed });
+      }
     } catch (error) {
       fail(res, error, `Invalid ${options.label}`);
     }

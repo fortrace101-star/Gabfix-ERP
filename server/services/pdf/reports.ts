@@ -263,3 +263,157 @@ export async function loadAssetRegister(client: PoolClient): Promise<RenderedDoc
   mirror(filename, buffer);
   return { buffer, filename };
 }
+
+export async function loadManifest(client: PoolClient, date: string): Promise<RenderedDocument | null> {
+  // All orders ready or dispatched on `date` — sorted by number for the
+  // collection driver's route sequence.
+  const { rows } = await client.query<{
+    number: string; customer_name: string; phone: string; items: string;
+    total: number; weight_kg: number; pieces: number; status: string;
+  }>(
+    `SELECT lo.number, c.name AS customer_name, c.phone, lo.items,
+            lo.total::float8 AS total, lo.weight_kg::float8 AS weight_kg, lo.pieces,
+            lo.status
+     FROM laundry_orders lo JOIN customers c ON c.id = lo.customer_id
+     WHERE lo.status IN ('Ready', 'Dispatched') AND DATE(lo.ready_at) = $1
+     ORDER BY lo.number`,
+    [date],
+  );
+
+  const itemRows: ItemRow[] = rows.map((order) => ({
+    cells: [
+      order.number,
+      order.customer_name,
+      order.items || '-',
+      `${order.weight_kg || 0}kg / ${order.pieces || 0} pcs`,
+      order.status,
+    ],
+    amount: order.total,
+  }));
+
+  const totalValue = rows.reduce((sum, order) => sum + order.total, 0);
+
+  const input: DocumentInput = {
+    title: 'COLLECTION / DELIVERY MANIFEST',
+    reference: `MANIFEST-${date}`,
+    brand,
+    meta: [
+      { label: 'Date', value: date },
+      { label: 'Orders', value: String(rows.length) },
+      { label: 'Generated', value: kampalaToday() },
+    ],
+    sections: [
+      {
+        heading: `Orders ready for collection on ${date}`,
+        columns: ['Number', 'Customer', 'Items', 'Weight / Pieces', 'Status'],
+        rows: itemRows,
+      },
+    ],
+    totals: [
+      { label: 'Orders listed', value: String(rows.length) },
+      { label: 'Total value', value: money(totalValue), emphasis: true },
+    ],
+    footerNote: 'This manifest lists all laundry orders ready or dispatched for the selected date.',
+  };
+  const buffer = await renderDocument(input);
+  const filename = `MANIFEST-${date}.pdf`;
+  mirror(filename, buffer);
+  return { buffer, filename };
+}
+
+export async function loadBalanceSheet(client: PoolClient, from?: string, to?: string): Promise<RenderedDocument> {
+  const today = kampalaToday();
+  // Balance sheet is cumulative — every posting up to the "as of" date.
+  const periodFrom = from || `${new Date().getFullYear()}-01-01`;
+  const periodTo = to || today;
+
+  // One row per account: net debit/credit totals from journal lines in range.
+  const { rows } = await client.query<{
+    code: string; name: string; type: string; debit: number; credit: number;
+  }>(
+    `SELECT a.code, a.name, a.type,
+            COALESCE(SUM(l.debit), 0)::float8 AS debit,
+            COALESCE(SUM(l.credit), 0)::float8 AS credit
+     FROM chart_of_accounts a
+     LEFT JOIN journal_lines l ON l.account_code = a.code
+     LEFT JOIN journal_entries e ON e.id = l.entry_id AND e.date >= $1 AND e.date <= $2
+     WHERE a.active
+     GROUP BY a.code, a.name, a.type
+     ORDER BY a.type, a.code`,
+    [periodFrom, periodTo],
+  );
+
+  // Normal balance: assets & expenses debit-side, the rest credit-side.
+  const netBalance = (row: { type: string; debit: number; credit: number }): number => {
+    switch (row.type) {
+      case 'asset':
+      case 'expense':
+        return row.debit - row.credit;
+      case 'liability':
+      case 'equity':
+      case 'income':
+        return row.credit - row.debit;
+      default:
+        return row.debit - row.credit;
+    }
+  };
+
+  const assets = rows.filter((r) => r.type === 'asset');
+  const liabilities = rows.filter((r) => r.type === 'liability');
+  const equityRows = rows.filter((r) => r.type === 'equity');
+  const income = rows.filter((r) => r.type === 'income');
+  const expenses = rows.filter((r) => r.type === 'expense');
+
+  const totalAssets = assets.reduce((sum, r) => sum + netBalance(r), 0);
+  const totalLiabilities = liabilities.reduce((sum, r) => sum + netBalance(r), 0);
+  const totalEquity = equityRows.reduce((sum, r) => sum + netBalance(r), 0);
+  const totalIncome = income.reduce((sum, r) => sum + netBalance(r), 0);
+  const totalExpenses = expenses.reduce((sum, r) => sum + netBalance(r), 0);
+  const netProfit = totalIncome - totalExpenses;
+
+  const input: DocumentInput = {
+    title: 'BALANCE SHEET',
+    reference: `BALANCE-SHEET ${periodFrom} to ${periodTo}`,
+    brand,
+    meta: [
+      { label: 'Period from', value: periodFrom },
+      { label: 'As of', value: periodTo },
+      { label: 'Generated', value: today },
+    ],
+    sections: [
+      {
+        heading: 'ASSETS',
+        columns: ['Account', 'Type'],
+        rows: assets.length
+          ? assets.map((r) => ({ cells: [`${r.code} ${r.name}`, r.type], amount: netBalance(r) }))
+          : [{ cells: ['No asset accounts with postings in range', ''], amount: 0 }],
+      },
+      {
+        heading: 'LIABILITIES',
+        columns: ['Account', 'Type'],
+        rows: liabilities.length
+          ? liabilities.map((r) => ({ cells: [`${r.code} ${r.name}`, r.type], amount: netBalance(r) }))
+          : [{ cells: ['No liability accounts with postings in range', ''], amount: 0 }],
+      },
+      {
+        heading: 'EQUITY',
+        columns: ['Account', 'Type'],
+        rows: [
+          ...equityRows.map((r) => ({ cells: [`${r.code} ${r.name}`, r.type], amount: netBalance(r) })),
+          { cells: ['Retained earnings (net profit)', ''], amount: netProfit },
+        ],
+      },
+    ],
+    totals: [
+      { label: 'Total assets', value: money(totalAssets), emphasis: true },
+      { label: 'Total liabilities', value: money(totalLiabilities) },
+      { label: 'Total equity', value: money(totalEquity + netProfit) },
+      { label: 'Net profit', value: money(netProfit), emphasis: true },
+    ],
+    footerNote: 'Drawn from the double-entry journal (008): assets by net debit, liabilities/equity by net credit. The accounting equation holds: assets = liabilities + equity.',
+  };
+  const buffer = await renderDocument(input);
+  const filename = `BALANCE-SHEET-${periodTo}.pdf`;
+  mirror(filename, buffer);
+  return { buffer, filename };
+}
