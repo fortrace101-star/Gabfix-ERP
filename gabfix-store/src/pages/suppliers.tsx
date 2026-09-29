@@ -3,15 +3,11 @@ import { KpiCard, KpiStrip } from "@/components/store/KpiCard";
 import { PageHeader } from "@/components/store/PageHeader";
 import { StatusBadge } from "@/components/store/StatusBadge";
 import { StoreButton } from "@/components/store/StoreButton";
-import {
-  compactCurrency,
-  currency,
-  purchaseRequests,
-  suppliers,
-  type PurchaseRequest,
-  type Supplier,
-} from "@/lib/store-data";
+import { compactCurrency, currency, type PurchaseRequest, type Supplier } from "@/lib/store-data";
 import { useDocumentTitle } from "@/lib/use-document-title";
+import { useState } from "react";
+import { storeMutations, useWorkspace } from "@/lib/workspace";
+import { PurchaseRequestModal } from "@/components/store/StoreModals";
 
 const requestColumns: Column<PurchaseRequest>[] = [
   {
@@ -106,9 +102,13 @@ function SuppliersPage() {
     "Suppliers & requests — Gabfix Store",
     "Supplier master list, year-to-date spend and the status of restock and purchase requests awaiting Admin approval.",
   );
+  const ws = useWorkspace();
+  const purchaseRequests = ws.purchaseRequests;
+  const suppliers = ws.suppliers;
   const pending = purchaseRequests.filter((r) => r.status === "Pending approval");
   const pendingValue = pending.reduce((s, r) => s + r.value, 0);
   const spend = suppliers.reduce((s, x) => s + x.spendYtd, 0);
+  const [prOpen, setPrOpen] = useState(false);
 
   return (
     <>
@@ -119,7 +119,9 @@ function SuppliersPage() {
         actions={
           <>
             <StoreButton variant="outline">Export supplier list</StoreButton>
-            <StoreButton variant="primary">New request</StoreButton>
+            <StoreButton variant="primary" onClick={() => setPrOpen(true)}>
+              New request
+            </StoreButton>
           </>
         }
       />
@@ -158,6 +160,15 @@ function SuppliersPage() {
           searchPlaceholder="Search supplier, contact or category..."
         />
       </section>
+
+      <PurchaseRequestModal
+        open={prOpen}
+        onClose={() => setPrOpen(false)}
+        items={ws.materials}
+        onSubmit={async (input) => {
+          await storeMutations.createPurchaseRequest(input);
+        }}
+      />
     </>
   );
 }

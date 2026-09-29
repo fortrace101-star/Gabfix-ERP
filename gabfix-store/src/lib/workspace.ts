@@ -99,6 +99,8 @@ function adaptMaterials(ws: Workspace, supplierName: (id: string | null) => stri
 }
 
 export function useWorkspace() {
+  const [tick, setTick] = useState(0);
+  useEffect(() => subscribeToWorkspaceEvents(() => setTick((t) => t + 1)), []);
   const [data, setData] = useState<{
     materials: Material[];
     movements: Movement[];
@@ -194,7 +196,7 @@ export function useWorkspace() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [tick]);
 
   return data;
 }
@@ -209,4 +211,83 @@ export function useDerived() {
     .filter((u) => u.status === "Quarantined")
     .reduce((sum, u) => sum + u.amount, 0);
   return { ws, stockValuation, lowStockItems, toolsOut, quarantinedSpend };
+}
+
+/** ── Phase E: mutations + cross-app SSE refresh ──────────────────────────── */
+
+export type NewMovement = {
+  itemId: string;
+  type: "Received" | "Issued" | "Adjustment" | "Return";
+  qty: number;
+  reference?: string;
+};
+
+export type NewPurchaseRequest = {
+  itemId: string;
+  description: string;
+  qty: number;
+  supplierId?: string | null;
+  value: number;
+};
+
+export type NewUtilityCapture = {
+  type: "Power" | "Water" | "Fuel" | "Transport" | "Maintenance";
+  reference: string;
+  reading?: string;
+  amount: number;
+  categoryKind: "direct" | "operations";
+};
+
+export const storeMutations = {
+  async createMovement(input: NewMovement): Promise<void> {
+    await storeApi.request("/store/movements", {
+      method: "POST",
+      body: JSON.stringify({ ...input, byName: localStorage.getItem("gabfix-store:who") ?? "" }),
+    });
+  },
+
+  async updateTool(
+    id: string,
+    patch: { status?: string; condition?: string; holderName?: string | null; jobLabel?: string | null; dueBack?: string | null; notes?: string | null },
+  ): Promise<void> {
+    await storeApi.request(`/store/tools/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+  },
+
+  async createPurchaseRequest(input: NewPurchaseRequest): Promise<void> {
+    await storeApi.request("/store/purchase-requests", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  },
+
+  async createUtilityCapture(input: NewUtilityCapture): Promise<void> {
+    await storeApi.request("/store/utility-captures", {
+      method: "POST",
+      body: JSON.stringify({ ...input, capturedBy: localStorage.getItem("gabfix-store:who") ?? "" }),
+    });
+  },
+};
+
+/**
+ * Re-fetch trigger: subscribes to the workspace SSE stream and calls `onChange`
+ * whenever a server event that could affect store data arrives. Cross-app by
+ * design — an admin approval or a laundry issue surfaces here without polling.
+ */
+export function subscribeToWorkspaceEvents(onChange: () => void): () => void {
+  const base = storeApi.baseUrl;
+  if (!base || typeof EventSource === "undefined") return () => undefined;
+  const token = localStorage.getItem("gabfix-store:auth-token");
+  // EventSource cannot send headers; the server accepts a bearer query param.
+  const url = token ? `${base}/events?access_token=${encodeURIComponent(token)}` : `${base}/events`;
+  const es = new EventSource(url);
+  const events = [
+    "inventory-updated",
+    "store-updated",
+    "purchase-approved",
+    "purchase-created",
+    "workspace-reset",
+    "settings-updated",
+  ];
+  for (const type of events) es.addEventListener(type, onChange);
+  return () => es.close();
 }

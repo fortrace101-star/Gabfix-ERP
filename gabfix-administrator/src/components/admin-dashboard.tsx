@@ -51,18 +51,18 @@ const navGroups = [
     label: "Workspace",
     items: [
       { label: "Overview", icon: LayoutDashboard, active: true },
-      { label: "Dispatch", icon: Gauge, count: 12 },
-      { label: "Finance", icon: CircleDollarSign },
+      { label: "Dispatch", icon: Gauge, navigateTo: "dispatch" },
+      { label: "Finance", icon: CircleDollarSign, navigateTo: "finance" },
     ],
   },
   {
     label: "Operations",
     items: [
-      { label: "Inventory", icon: Boxes },
-      { label: "Assets", icon: HardHat },
+      { label: "Inventory", icon: Boxes, navigateTo: "inventory" },
+      { label: "Assets", icon: HardHat, navigateTo: "assets" },
       { label: "Staff", icon: Users, navigateTo: "employees" },
-      { label: "Messages", icon: MessageSquareText, count: 5 },
-      { label: "Sync health", icon: Wifi },
+      { label: "Messages", icon: MessageSquareText, navigateTo: "messages" },
+      { label: "Sync health", icon: Wifi, navigateTo: "sync-health" },
     ],
   },
   {
@@ -193,7 +193,7 @@ function StatusBadge({ tone, children }: { tone: string; children: string }) {
 export function AdminDashboard({
   onNavigate,
 }: {
-  onNavigate?: (page: "dashboard" | "logs" | "employees" | "settings") => void;
+  onNavigate?: (page: string) => void;
 }) {
   const live = useWorkspaceMetrics();
   const [session, setSession] = useState<StaffSession | null>(null);
@@ -278,7 +278,7 @@ export function AdminDashboard({
                     key={item.label}
                     title={collapsed ? item.label : undefined}
                     onClick={() =>
-                      item.navigateTo && onNavigate?.(item.navigateTo as "dashboard" | "logs" | "employees" | "settings")
+                      item.navigateTo && onNavigate?.(item.navigateTo)
                     }
                     className={cn(
                       "group flex h-10 w-full items-center gap-3 rounded-md px-3 text-sm transition-colors",

@@ -3,14 +3,11 @@ import { KpiCard, KpiStrip } from "@/components/store/KpiCard";
 import { PageHeader } from "@/components/store/PageHeader";
 import { StatusBadge } from "@/components/store/StatusBadge";
 import { StoreButton } from "@/components/store/StoreButton";
-import {
-  compactCurrency,
-  currency,
-  quarantinedSpend,
-  utilityEntries,
-  type UtilityEntry,
-} from "@/lib/store-data";
+import { compactCurrency, currency, type UtilityEntry } from "@/lib/store-data";
 import { useDocumentTitle } from "@/lib/use-document-title";
+import { useState } from "react";
+import { storeMutations, useWorkspace, type NewUtilityCapture } from "@/lib/workspace";
+import { UtilityModal } from "@/components/store/StoreModals";
 
 const columns: Column<UtilityEntry>[] = [
   {
@@ -71,11 +68,17 @@ function UtilitiesPage() {
     "Utilities & running costs — Gabfix Store",
     "Capture power, water, fuel, transport and maintenance slips. Entries stay quarantined until Admin approval posts them to the P&L.",
   );
+  const ws = useWorkspace();
+  const utilityEntries = ws.utilities;
+  const quarantinedSpend = utilityEntries
+    .filter((u) => u.status === "Quarantined")
+    .reduce((s, u) => s + u.amount, 0);
   const total = utilityEntries.reduce((s, u) => s + u.amount, 0);
   const jobCost = utilityEntries
     .filter((u) => u.category.startsWith("1"))
     .reduce((s, u) => s + u.amount, 0);
   const quarantined = utilityEntries.filter((u) => u.status === "Quarantined").length;
+  const [capOpen, setCapOpen] = useState(false);
 
   return (
     <>
@@ -86,7 +89,9 @@ function UtilitiesPage() {
         actions={
           <>
             <StoreButton variant="outline">Meter reading</StoreButton>
-            <StoreButton variant="primary">Capture slip</StoreButton>
+            <StoreButton variant="primary" onClick={() => setCapOpen(true)}>
+              Capture slip
+            </StoreButton>
           </>
         }
       />
@@ -121,6 +126,17 @@ function UtilitiesPage() {
         rows={utilityEntries}
         searchPlaceholder="Search type, meter, category or staff..."
         actions={<StoreButton variant="ghost">Filters</StoreButton>}
+      />
+
+      <UtilityModal
+        open={capOpen}
+        onClose={() => setCapOpen(false)}
+        onSubmit={async (input) => {
+          await storeMutations.createUtilityCapture({
+            ...input,
+            type: input.type as NewUtilityCapture["type"],
+          });
+        }}
       />
 
       <div className="rounded-xl border border-gold/40 bg-gold-soft px-5 py-4 text-sm text-gold-foreground">

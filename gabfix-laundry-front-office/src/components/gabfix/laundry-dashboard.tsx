@@ -139,6 +139,47 @@ export function LaundryDashboard({ active }: { active: string }) {
     setIntakeOpen(false);
     setSelected(order);
     toast.success("Intake saved", { description: "Draft ticket queued for sync." });
+    // Live sync attempt (C1): when online the intake lands on the server with a
+    // real LDY number; offline the DRAFT stays queued in the Dexie outbox.
+    if (online && laundryApi.isConfigured) {
+      try {
+        const created = await laundryApi.request<{ id: string; number: string; total: number }>(
+          "/laundry",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              customerId: "c1", // walk-in counter sale attributed to the house account
+              items: `${order.service} · ${order.itemCount} items`,
+              pieces: order.itemCount,
+              promisedAt: order.dueAt || null,
+              lines: [
+                {
+                  description: order.service,
+                  qty: order.itemCount,
+                  unitPrice: order.itemCount > 0 ? order.amount / order.itemCount : order.amount,
+                  amount: order.amount,
+                },
+              ],
+            }),
+          },
+        );
+        const live: CachedOrder = {
+          ...order,
+          id: created.id,
+          orderNumber: created.number,
+          synced: true,
+        };
+        setOrders((current) => [
+          live,
+          ...current.filter((item) => item.id !== order.id && item.id !== created.id),
+        ]);
+        await laundryDb.orders_cache.put(live);
+        await laundryDb.outbox.where("entity").equals("laundry_order").delete();
+        toast.success(`Synced as ${created.number}`);
+      } catch {
+        toast.info("Queued offline", { description: "Will sync when the connection returns." });
+      }
+    }
   }
   async function advance(order: CachedOrder) {
     const index = statuses.indexOf(order.status);
@@ -156,6 +197,19 @@ export function LaundryDashboard({ active }: { active: string }) {
     });
     setSelected(updated);
     toast.success(`Moved to ${label(updated.status)}`);
+    if (!order.id.startsWith("local-") && laundryApi.isConfigured) {
+      try {
+        await laundryApi.request(`/laundry/${order.id}/status`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: label(updated.status) }),
+        });
+        const syncedRow = { ...updated, synced: true };
+        setOrders((current) => current.map((item) => (item.id === order.id ? syncedRow : item)));
+        await laundryDb.orders_cache.put(syncedRow);
+      } catch {
+        /* stays queued in the outbox for retry */
+      }
+    }
   }
   async function ticket(order: CachedOrder) {
     const [{ jsPDF }, { default: autoTable }] = await Promise.all([
@@ -252,7 +306,7 @@ export function LaundryDashboard({ active }: { active: string }) {
           >
             <Menu />
           </Button>
-          <div className="relative max-w-md flex-1">
+          <div className="relative hidden max-w-md flex-1 xs:block sm:block">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
@@ -295,11 +349,11 @@ export function LaundryDashboard({ active }: { active: string }) {
           </div>
           {(active === "overview" || active === "orders") && (
             <>
-              <section className="mb-5 grid grid-cols-2 overflow-hidden rounded-md border border-border lg:grid-cols-5">
-                {kpis.map(([title, value, Icon]) => (
+              <section className="mb-5 grid grid-cols-2 overflow-hidden rounded-md border border-border sm:grid-cols-3 lg:grid-cols-5">
+                {kpis.map(([title, value, Icon], i) => (
                   <div
                     key={title}
-                    className="border-b border-r border-border bg-card p-5 last:border-r-0 lg:border-b-0"
+                    className={`border-r border-b border-border bg-card p-4 sm:p-5 ${i === 0 ? "" : ""} ${i >= 4 ? "col-span-2 sm:col-span-1" : ""} last:border-r-0 lg:border-b-0`}
                   >
                     <div className="flex items-center justify-between text-sm text-muted-foreground">
                       <span>{title}</span>
@@ -355,18 +409,51 @@ function OrderTable({
 }) {
   return (
     <section className="overflow-hidden rounded-md border border-border bg-card">
-      <div className="flex items-center justify-between border-b border-border px-5 py-4">
+      <div className="flex items-center justify-between border-b border-border px-4 py-4 sm:px-5">
         <div>
           <h2 className="font-semibold">Today’s orders</h2>
           <p className="text-xs text-muted-foreground">Live laundry queue and promised handovers</p>
         </div>
-        <Button variant="outline" size="sm">
+        <Button variant="outline" size="sm" className="hidden sm:inline-flex">
           <Download />
           Export
         </Button>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-left text-sm">
+
+      {/* Mobile: tap-friendly card list (44px targets) */}
+      <ul className="divide-y divide-border md:hidden">
+        {orders.map((order) => (
+          <li key={order.id}>
+            <button
+              onClick={() => onSelect(order)}
+              className="flex min-h-16 w-full flex-col gap-1.5 px-4 py-3 text-left hover:bg-muted/35"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-mono text-xs font-bold text-primary">
+                  {order.orderNumber}
+                  {!order.synced && <span className="ml-2 text-danger">•</span>}
+                </span>
+                <StatusPill status={order.status} />
+              </div>
+              <p className="font-semibold">{order.customerName}</p>
+              <p className="text-xs text-muted-foreground">{order.customerPhone}</p>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>
+                  {order.service} · {order.itemCount} items
+                </span>
+                <span className="font-semibold text-foreground">{money(order.amount)}</span>
+              </div>
+            </button>
+          </li>
+        ))}
+        {orders.length === 0 && (
+          <li className="px-4 py-8 text-center text-sm text-muted-foreground">No orders yet</li>
+        )}
+      </ul>
+
+      {/* Desktop: full table */}
+      <div className="hidden overflow-x-auto md:block">
+        <table className="w-full text-left text-sm">
           <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
             <tr>
               {["Order", "Customer", "Service", "Items", "Due", "Amount", "Status"].map((h) => (
@@ -419,9 +506,12 @@ function StatusBoard({
   onSelect: (o: CachedOrder) => void;
 }) {
   return (
-    <div className="grid gap-3 xl:grid-cols-5">
+    <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-2 xl:grid xl:grid-cols-5 xl:overflow-visible">
       {statuses.map((status) => (
-        <section key={status} className="min-h-80 rounded-md border border-border bg-card">
+        <section
+          key={status}
+          className="min-h-80 w-[78vw] max-w-64 shrink-0 snap-start rounded-md border border-border bg-card sm:w-64 xl:w-auto xl:max-w-none"
+        >
           <header className="flex items-center justify-between border-b border-border p-4">
             <h2 className="font-semibold">{label(status)}</h2>
             <span className="rounded bg-muted px-2 py-1 text-xs">
@@ -602,8 +692,8 @@ function IntakeModal({
   onSubmit: (data: FormData) => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-overlay p-4">
-      <div className="w-full max-w-xl rounded-lg border border-border bg-popover shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-overlay p-0 sm:items-center sm:p-4">
+      <div className="max-h-[92dvh] w-full max-w-xl overflow-y-auto rounded-t-2xl border border-border bg-popover shadow-2xl sm:rounded-lg">
         <header className="flex items-center justify-between border-b border-border p-5">
           <div>
             <h2 className="text-lg font-semibold">New laundry intake</h2>

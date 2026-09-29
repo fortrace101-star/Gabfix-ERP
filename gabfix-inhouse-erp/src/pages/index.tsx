@@ -1,4 +1,3 @@
-import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Bell,
@@ -28,7 +27,9 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { jobs, roleCopy, type Job, type Role } from "@/lib/portal-data";
+import { jobs as demoJobs, roleCopy, type Job, type Role } from "@/lib/portal-data";
+import { setJobStatus, subscribeToJobEvents, useMyJobs, type PortalJob } from "@/lib/workspace";
+import { useEffect, useMemo, useState } from "react";
 import { queueShiftPing } from "@/lib/beacon-outbox";
 import { useDocumentTitle } from "@/lib/use-document-title";
 import { useSession } from "@/lib/session";
@@ -59,11 +60,17 @@ export default function PortalPage() {
   );
   const session = useSession();
   const [role, setRole] = useState<Role>("Technician");
+  const { jobs: liveJobs, error: jobsError } = useMyJobs(session?.name ?? null);
+  const [tick, setTick] = useState(0);
+  const [transition, setTransition] = useState<PortalJob | null>(null);
+  const [acting, setActing] = useState(false);
+  const refresh = () => setTick((t) => t + 1);
+  useEffect(() => subscribeToJobEvents(refresh), []);
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [mobileNav, setMobileNav] = useState(false);
   const [active, setActive] = useState("My day");
   const copy = roleCopy[role];
-  const visibleJobs = useMemo(() => (role === "Supervisor" ? jobs : jobs.slice(0, 3)), [role]);
+  const visibleJobs = useMemo(() => (role === "Supervisor" ? demoJobs : demoJobs.slice(0, 3)), [role]);
   const kpis =
     role === "Sales"
       ? [
@@ -263,7 +270,41 @@ export default function PortalPage() {
                 </Button>
               </div>
               <div className="job-list">
-                {visibleJobs.map((job) => (
+                {(liveJobs ?? []).slice(0, role === "Supervisor" ? 12 : 6).map((lj) => (
+                  <button
+                    className="job-row"
+                    key={lj.id}
+                    onClick={() =>
+                      setTransition(lj)
+                    }
+                  >
+                    <div className="time">
+                      <strong>{lj.date}</strong>
+                      <span>{lj.number}</span>
+                    </div>
+                    <div className="job-title">
+                      <strong>{lj.service}</strong>
+                      <span>
+                        {lj.customer} · {lj.mine ? "assigned to you" : "crew"}
+                      </span>
+                    </div>
+                    <span className={"status status-" + lj.status.toLowerCase().replace(" ", "-")}>
+                      <span />
+                      {lj.status}
+                    </span>
+                    <span className="job-value">
+                      {new Intl.NumberFormat("en-UG", { style: "currency", currency: "UGX", maximumFractionDigits: 0 }).format(lj.revenue)}
+                    </span>
+                    <ChevronRight />
+                  </button>
+                ))}
+                {liveJobs === null && !jobsError && (
+                  <p className="px-4 py-6 text-sm text-muted-foreground">Loading jobs…</p>
+                )}
+                {jobsError && (
+                  <p className="px-4 py-6 text-sm text-destructive">{jobsError}</p>
+                )}
+                {false && visibleJobs.map((job: Job) => (
                   <button className="job-row" key={job.id} onClick={() => setSelectedJob(job)}>
                     <div className="time">
                       <strong>{job.time}</strong>
@@ -316,7 +357,7 @@ export default function PortalPage() {
                   </div>
                   <CalendarDays />
                 </div>
-                {jobs.slice(1, 3).map((job) => (
+                {demoJobs.slice(1, 3).map((job) => (
                   <div className="mini-job" key={job.id}>
                     <strong>{job.time}</strong>
                     <div>
@@ -399,6 +440,64 @@ export default function PortalPage() {
           )}
         </SheetContent>
       </Sheet>
+
+      {transition && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+          <button
+            aria-label="Close dialog"
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setTransition(null)}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="relative w-full max-w-md rounded-t-2xl border border-border bg-card p-6 shadow-2xl sm:rounded-2xl"
+          >
+            <p className="font-mono text-xs text-primary">{transition.number}</p>
+            <h3 className="mt-1 text-lg font-semibold">{transition.service}</h3>
+            <p className="text-sm text-muted-foreground">
+              {transition.customer} · currently {transition.status}
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              {(() => {
+                const flow = ["Quoted", "Scheduled", "In Progress", "Completed"];
+                const idx = flow.indexOf(transition.status);
+                const next = idx >= 0 && idx < flow.length - 1 ? flow[idx + 1] : null;
+                return (
+                  <>
+                    {next && (
+                      <Button
+                        disabled={acting}
+                        onClick={async () => {
+                          setActing(true);
+                          try {
+                            await setJobStatus(transition.id, next);
+                            refresh();
+                            setTransition(null);
+                          } finally {
+                            setActing(false);
+                          }
+                        }}
+                      >
+                        {acting
+                          ? "Saving…"
+                          : next === "In Progress"
+                            ? "Start job"
+                            : next === "Completed"
+                              ? "Complete job"
+                              : `Move to ${next}`}
+                      </Button>
+                    )}
+                    <Button variant="outline" onClick={() => setTransition(null)}>
+                      Close
+                    </Button>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

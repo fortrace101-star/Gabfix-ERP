@@ -22,6 +22,8 @@ import { notificationsRouter } from './routes/notifications';
 import { telemetryRouter } from './routes/telemetry';
 import { employeesRouter } from './routes/employees';
 import { settingsRouter } from './routes/settings';
+import { storeRouter } from './routes/store';
+import { jobStatusRouter } from './routes/job-status';
 import { guard, requireScope } from './middleware/auth';
 import { requestLogger } from './middleware/requestLogger';
 
@@ -77,6 +79,7 @@ const scoped = requireScope;
 app.use('/api/data', scoped('admin', 'laundry', 'portal', 'store'), workspaceRouter);
 app.use('/api/customers', scoped('admin', 'laundry', 'portal', 'store'), customersRouter);
 app.use('/api/jobs', scoped('admin', 'portal', 'laundry'), jobsRouter);
+app.use('/api/jobs', scoped('admin', 'portal'), jobStatusRouter); // :id/status lifecycle (D2)
 app.use('/api/payments', scoped('admin', 'laundry', 'store', 'portal'), paymentsRouter);
 app.use('/api', scoped('admin', 'portal'), costingRouter); // /costs, /timesheets (Phase 1c)
 app.use('/api/equipment', scoped('admin', 'laundry'), equipmentRouter);
@@ -98,6 +101,8 @@ app.use('/api', scoped('admin', 'portal', 'laundry', 'store'), telemetryRouter);
 // Owner/manager checks live inside the routers (requireRole/guard('owner','manager')).
 app.use('/api/employees', scoped('admin'), employeesRouter);
 app.use('/api/settings', scoped('admin'), settingsRouter);
+// Store operations (plan v5 E2–E5): movements, tools, purchase requests, utilities.
+app.use('/api/store', scoped('admin', 'store'), storeRouter);
 // Feedback links are shared via email/WhatsApp — mount public routes outside guard.
 app.use('/', notificationsRouter);
 

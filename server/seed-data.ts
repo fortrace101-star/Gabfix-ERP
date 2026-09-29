@@ -36,6 +36,29 @@ export async function ensureOwner(client: ClientBase): Promise<void> {
 }
 
 /**
+ * Demo staff so every app has a working login (plan v5: laundry/portal/store
+ * need real employees to authenticate). Fixed UUIDs + ON CONFLICT keep it
+ * idempotent; employees are not in TRUNCATE_TABLES so staff survives resets.
+ * Password comes from STAFF_PASSWORD (default 'gabfix-staff') and is hashed once.
+ */
+export async function ensureStaff(client: ClientBase): Promise<void> {
+  const password = process.env.STAFF_PASSWORD || 'gabfix-staff';
+  const pinHash = await bcrypt.hash(password, 10);
+  await client.query(
+    `INSERT INTO employees (id, name, role, phone, email, app_scope, pin_hash, active)
+     VALUES
+       ('00000000-0000-4000-8000-000000000010', 'Grace Atim',    'manager',     '+256 772 100 010', 'grace@gabfix.ug', ARRAY['admin','store']::TEXT[],             $1, TRUE),
+       ('00000000-0000-4000-8000-000000000011', 'Moses Okello',  'storekeeper', '+256 772 100 011', 'moses@gabfix.ug', ARRAY['store']::TEXT[],                     $1, TRUE),
+       ('00000000-0000-4000-8000-000000000012', 'Diana Achieng', 'laundry',     '+256 772 100 012', 'diana@gabfix.ug', ARRAY['laundry']::TEXT[],                   $1, TRUE),
+       ('00000000-0000-4000-8000-000000000013', 'John Kato',     'technician',  '+256 772 100 013', 'john@gabfix.ug',  ARRAY['portal']::TEXT[],                    $1, TRUE),
+       ('00000000-0000-4000-8000-000000000014', 'Peter Ssali',   'sales',       '+256 772 100 014', 'peter@gabfix.ug', ARRAY['portal']::TEXT[],                    $1, TRUE)
+     ON CONFLICT (id) DO NOTHING`,
+    [pinHash],
+  );
+  console.log('[db] Demo staff ensured (password from STAFF_PASSWORD)');
+}
+
+/**
  * Seeds the initial Gabfix demo data — the same records the app previously shipped
  * with in the frontend (seedData in App.tsx).
  */

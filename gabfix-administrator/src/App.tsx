@@ -4,6 +4,9 @@ import { AdminDashboard } from "@/components/admin-dashboard";
 import { RequestLogsPage } from "@/components/RequestLogsPage";
 import { EmployeesPage } from "@/components/EmployeesPage";
 import { SettingsPage } from "@/components/SettingsPage";
+import { DispatchPage } from "@/components/DispatchPage";
+import { FinancePage } from "@/components/FinancePage";
+import { AssetsPage, InventoryPage, MessagesPage, SyncHealthPage } from "@/components/OpsPages";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { registerAdminServiceWorker } from "@/lib/pwa";
 
@@ -79,6 +82,8 @@ function SettingsRoute() {
   return <SettingsPage onBack={() => window.history.back()} />;
 }
 
+const back = () => window.history.back();
+
 export default function App() {
   void registerAdminServiceWorker();
 
@@ -120,6 +125,12 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            <Route path="/dispatch" element={<ProtectedRoute><DispatchPage onBack={back} /></ProtectedRoute>} />
+            <Route path="/finance" element={<ProtectedRoute><FinancePage onBack={back} /></ProtectedRoute>} />
+            <Route path="/inventory" element={<ProtectedRoute><InventoryPage onBack={back} /></ProtectedRoute>} />
+            <Route path="/assets" element={<ProtectedRoute><AssetsPage onBack={back} /></ProtectedRoute>} />
+            <Route path="/messages" element={<ProtectedRoute><MessagesPage onBack={back} /></ProtectedRoute>} />
+            <Route path="/sync-health" element={<ProtectedRoute><SyncHealthPage onBack={back} /></ProtectedRoute>} />
           </Routes>
         </Suspense>
       </BrowserRouter>

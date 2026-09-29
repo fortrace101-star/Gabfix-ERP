@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { useState } from "react";
 import { AlertTriangle, Boxes, Fuel, Wrench } from "lucide-react";
 import {
   Area,
@@ -15,7 +16,8 @@ import { PageHeader } from "@/components/store/PageHeader";
 import { StatusBadge } from "@/components/store/StatusBadge";
 import { StoreButton } from "@/components/store/StoreButton";
 import { compactCurrency, currency, stockStatus, throughput } from "@/lib/store-data";
-import { useDerived } from "@/lib/workspace";
+import { useDerived, storeMutations } from "@/lib/workspace";
+import { MovementModal } from "@/components/store/StoreModals";
 import { useDocumentTitle } from "@/lib/use-document-title";
 
 function Overview() {
@@ -25,6 +27,8 @@ function Overview() {
   );
   const { ws, stockValuation, lowStockItems, toolsOut, quarantinedSpend } = useDerived();
   const movements = ws.movements;
+  const [movementOpen, setMovementOpen] = useState(false);
+  void storeMutations;
 
   if (ws.loading) {
     return (
@@ -50,7 +54,17 @@ function Overview() {
         actions={
           <>
             <StoreButton variant="outline">Export stock list</StoreButton>
-            <StoreButton variant="primary">+ New movement</StoreButton>
+            <StoreButton variant="primary" onClick={() => setMovementOpen(true)}>
+              + New movement
+            </StoreButton>
+            <MovementModal
+              open={movementOpen}
+              onClose={() => setMovementOpen(false)}
+              items={ws.materials}
+              onSubmit={async (input) => {
+                await storeMutations.createMovement(input);
+              }}
+            />
           </>
         }
       />

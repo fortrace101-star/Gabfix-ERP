@@ -14,7 +14,7 @@
 import type { Response } from 'express';
 
 export type RealtimeEvent = {
-     type: 'job-created' | 'job-updated' | 'customer-created' | 'expense-created' | 'equipment-created' | 'equipment-updated' | 'inventory-created' | 'inventory-updated' | 'payment-created' | 'asset-depreciated' | 'laundry-updated' | 'notification' | 'workspace-reset' | 'ping.recorded' | 'request-log' | 'settings-updated' | 'employees-updated';
+     type: 'job-created' | 'job-updated' | 'customer-created' | 'expense-created' | 'equipment-created' | 'equipment-updated' | 'inventory-created' | 'inventory-updated' | 'payment-created' | 'asset-depreciated' | 'laundry-updated' | 'notification' | 'workspace-reset' | 'ping.recorded' | 'request-log' | 'settings-updated' | 'employees-updated' | 'store-updated' | 'purchase-created' | 'purchase-approved';
   at: string;
   by?: string;
   /** Optional payload that the SSE endpoint forwards to subscribers. */
