@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import { Download, Plus } from "lucide-react";
 import { AdminModal, AdminPage, adminFieldLabel, adminInputClass } from "@/components/AdminPage";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api";
+import { downloadRegisterPdf, type DocumentType } from "@/lib/pdf";
 import { useWorkspaceData, useWorkspaceSse } from "@/lib/workspace-data";
 
 const money = (v: number) => `UGX ${Math.round(v).toLocaleString("en-UG")}`;
@@ -71,6 +72,23 @@ export function FinancePage({ onBack }: { onBack?: () => void }) {
 
   const unpaid = (data?.invoices ?? []).filter((i) => i.status !== "Paid");
 
+  async function postUtility(id: string) {
+    setSaving(true);
+    setFormError("");
+    try {
+      await apiClient.request(`/store/utility-captures/${id}/post`, { method: "POST" });
+      refresh();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Posting failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function registerPdf(type: DocumentType) {
+    downloadRegisterPdf(type).catch((err) => setFormError(err instanceof Error ? err.message : "PDF failed"));
+  }
+
   return (
     <AdminPage
       title="Finance"
@@ -80,6 +98,15 @@ export function FinancePage({ onBack }: { onBack?: () => void }) {
       error={error}
       actions={
         <>
+          <Button size="sm" variant="outline" onClick={() => registerPdf("pl")} title="Profit & loss statement">
+            <Download /> P&L
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => registerPdf("balance-sheet")} title="Balance sheet">
+            <Download /> Balance sheet
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => registerPdf("aging")} title="Receivables aging">
+            <Download /> Aging
+          </Button>
           <Button size="sm" variant="outline" onClick={() => setModal("expense")}>
             <Plus /> Expense
           </Button>
@@ -149,6 +176,57 @@ export function FinancePage({ onBack }: { onBack?: () => void }) {
                   <td className="px-4 py-3 text-right">{money(p.amount)}</td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="mb-6">
+        <h2 className="mb-3 text-base font-semibold">Utility captures from the store</h2>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Slips captured in the store app land here quarantined — posting writes the matching expense row and links it.
+        </p>
+        {formError && <p className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">{formError}</p>}
+        <div className="overflow-hidden rounded-xl border border-border">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3">Captured</th>
+                <th className="px-4 py-3">Type</th>
+                <th className="px-4 py-3">Reference</th>
+                <th className="px-4 py-3">By</th>
+                <th className="px-4 py-3 text-right">Amount</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {(data?.utilityCaptures ?? []).slice(0, 12).map((u) => (
+                <tr key={u.id} className="border-t border-border">
+                  <td className="px-4 py-3 text-muted-foreground">{u.capturedOn}</td>
+                  <td className="px-4 py-3">{u.type}</td>
+                  <td className="px-4 py-3">{u.reference}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{u.capturedBy || "—"}</td>
+                  <td className="px-4 py-3 text-right">{money(u.amount)}</td>
+                  <td className="px-4 py-3">{u.status}</td>
+                  <td className="px-4 py-3 text-right">
+                    {u.status === "Quarantined" ? (
+                      <Button size="sm" variant="outline" disabled={saving} onClick={() => postUtility(u.id)}>
+                        Post to ledger
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">{u.expenseId ? "posted" : ""}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {(data?.utilityCaptures ?? []).length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">
+                    No utility captures yet — store slips appear here for one-click posting.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

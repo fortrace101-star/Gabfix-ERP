@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   Bell,
+  Moon,
+  Sun,
   Boxes,
   BriefcaseBusiness,
   ChevronDown,
@@ -16,6 +18,7 @@ import {
   LayoutDashboard,
   Menu,
   MessageSquareText,
+  Radio,
   PackageCheck,
   Search,
   Settings,
@@ -38,6 +41,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { apiClient, type StaffSession } from "@/lib/api";
 import { useWorkspaceMetrics } from "@/lib/workspace";
+import { useWorkspaceData } from "@/lib/workspace-data";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,6 +57,7 @@ const navGroups = [
       { label: "Overview", icon: LayoutDashboard, active: true },
       { label: "Dispatch", icon: Gauge, navigateTo: "dispatch" },
       { label: "Finance", icon: CircleDollarSign, navigateTo: "finance" },
+      { label: "Customers", icon: Users, navigateTo: "customers" },
     ],
   },
   {
@@ -60,6 +65,7 @@ const navGroups = [
     items: [
       { label: "Inventory", icon: Boxes, navigateTo: "inventory" },
       { label: "Assets", icon: HardHat, navigateTo: "assets" },
+      { label: "Devices", icon: Radio, navigateTo: "devices" },
       { label: "Staff", icon: Users, navigateTo: "employees" },
       { label: "Messages", icon: MessageSquareText, navigateTo: "messages" },
       { label: "Sync health", icon: Wifi, navigateTo: "sync-health" },
@@ -196,6 +202,7 @@ export function AdminDashboard({
   onNavigate?: (page: string) => void;
 }) {
   const live = useWorkspaceMetrics();
+  const { data: workspace } = useWorkspaceData();
   const [session, setSession] = useState<StaffSession | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -212,14 +219,56 @@ export function AdminDashboard({
   const [range, setRange] = useState("7 days");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
+  // Theme toggle (gap item 8): class-on-<html> dark mode with persistence.
+  const [dark, setDark] = useState(() => {
+    try {
+      return localStorage.getItem("gabfix-admin:theme") === "dark";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+    try {
+      localStorage.setItem("gabfix-admin:theme", dark ? "dark" : "light");
+    } catch {
+      /* private mode: theme just doesn't persist */
+    }
+  }, [dark]);
+
+  // Live jobs (A6): the console table reads real rows when the API is
+  // configured, and falls back to the demo board so the shell still demos.
+  const liveJobs = useMemo(() => {
+    if (!workspace) return null;
+    const toneFor = (status: string): string =>
+      status === "In Progress"
+        ? "info"
+        : status === "Completed"
+          ? "success"
+          : status === "Quoted"
+            ? "warning"
+            : status === "Cancelled"
+              ? "danger"
+              : "neutral";
+    return workspace.jobs.slice(0, 8).map((job) => ({
+      id: job.number,
+      client: workspace.customers.find((c) => c.id === job.customerId)?.name ?? "—",
+      service: workspace.services.find((s) => s.id === job.serviceId)?.name ?? "—",
+      team: job.assignees.join(", ") || "unassigned",
+      due: job.date,
+      status: job.status,
+      tone: toneFor(job.status),
+    }));
+  }, [workspace]);
 
   const filteredJobs = useMemo(() => {
+    const source = liveJobs ?? jobs;
     const term = query.trim().toLowerCase();
-    if (!term) return jobs;
-    return jobs.filter((job) =>
+    if (!term) return source;
+    return source.filter((job) =>
       Object.values(job).some((value) => value.toLowerCase().includes(term)),
     );
-  }, [query]);
+  }, [liveJobs, query]);
 
   function toggleSelected(id: string) {
     setSelected((current) =>
@@ -358,6 +407,14 @@ export function AdminDashboard({
               <span className="size-2 rounded-full bg-success shadow-status" />
               All systems operational
             </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
+              onClick={() => setDark((value) => !value)}
+            >
+              {dark ? <Sun /> : <Moon />}
+            </Button>
             <Button variant="ghost" size="icon" aria-label="Notifications" className="relative">
               <Bell />
               <span className="absolute right-2 top-2 size-1.5 rounded-full bg-destructive ring-2 ring-background" />

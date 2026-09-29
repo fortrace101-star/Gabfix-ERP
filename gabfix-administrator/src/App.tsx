@@ -6,6 +6,8 @@ import { EmployeesPage } from "@/components/EmployeesPage";
 import { SettingsPage } from "@/components/SettingsPage";
 import { DispatchPage } from "@/components/DispatchPage";
 import { FinancePage } from "@/components/FinancePage";
+import { CustomersPage } from "@/components/CustomersPage";
+import { DevicesPage } from "@/components/DevicesPage";
 import { AssetsPage, InventoryPage, MessagesPage, SyncHealthPage } from "@/components/OpsPages";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { registerAdminServiceWorker } from "@/lib/pwa";
@@ -64,7 +66,31 @@ function DashboardPage() {
   return (
     <AdminDashboard
       onNavigate={(page) =>
-        navigate(page === "logs" ? "/logs" : page === "employees" ? "/employees" : page === "settings" ? "/settings" : "/")
+        navigate(
+          page === "logs"
+            ? "/logs"
+            : page === "employees"
+              ? "/employees"
+              : page === "settings"
+                ? "/settings"
+                : page === "dispatch"
+                  ? "/dispatch"
+                  : page === "finance"
+                    ? "/finance"
+                    : page === "customers"
+                      ? "/customers"
+                      : page === "devices"
+                        ? "/devices"
+                        : page === "inventory"
+                          ? "/inventory"
+                          : page === "assets"
+                            ? "/assets"
+                            : page === "messages"
+                              ? "/messages"
+                              : page === "sync-health"
+                                ? "/sync-health"
+                                : "/",
+        )
       }
     />
   );
@@ -127,6 +153,8 @@ export default function App() {
             />
             <Route path="/dispatch" element={<ProtectedRoute><DispatchPage onBack={back} /></ProtectedRoute>} />
             <Route path="/finance" element={<ProtectedRoute><FinancePage onBack={back} /></ProtectedRoute>} />
+            <Route path="/customers" element={<ProtectedRoute><CustomersPage onBack={back} /></ProtectedRoute>} />
+            <Route path="/devices" element={<ProtectedRoute><DevicesPage onBack={back} /></ProtectedRoute>} />
             <Route path="/inventory" element={<ProtectedRoute><InventoryPage onBack={back} /></ProtectedRoute>} />
             <Route path="/assets" element={<ProtectedRoute><AssetsPage onBack={back} /></ProtectedRoute>} />
             <Route path="/messages" element={<ProtectedRoute><MessagesPage onBack={back} /></ProtectedRoute>} />

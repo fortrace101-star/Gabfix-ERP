@@ -30,7 +30,7 @@ import {
 import { jobs as demoJobs, roleCopy, type Job, type Role } from "@/lib/portal-data";
 import { setJobStatus, subscribeToJobEvents, useMyJobs, type PortalJob } from "@/lib/workspace";
 import { useEffect, useMemo, useState } from "react";
-import { queueShiftPing } from "@/lib/beacon-outbox";
+import { useBeacon } from "@/lib/beacon";
 import { useDocumentTitle } from "@/lib/use-document-title";
 import { useSession } from "@/lib/session";
 
@@ -103,7 +103,7 @@ export default function PortalPage() {
   const selectNav = (label: string) => {
     setActive(label);
     setMobileNav(false);
-    if (label !== "My day") toast(`${label} is ready for backend connection`);
+    if (label !== "My day" && label !== "My trail") toast(`${label} is ready for backend connection`);
   };
 
   return (
@@ -141,11 +141,8 @@ export default function PortalPage() {
           <p>FIELD</p>
           <Button
             variant="ghost"
-            className="nav-item"
-            onClick={() => {
-              const queued = queueShiftPing();
-              toast.success(`Shift ping saved · ${queued} queued`);
-            }}
+            className={`nav-item ${active === "My trail" ? "nav-active" : ""}`}
+            onClick={() => selectNav("My trail")}
           >
             <Radio />
             <span>My trail</span>
@@ -372,6 +369,8 @@ export default function PortalPage() {
         </main>
       </div>
 
+      {active === "My trail" && <TrailPanel />}
+
       <Sheet open={Boolean(selectedJob)} onOpenChange={(open) => !open && setSelectedJob(null)}>
         <SheetContent className="job-sheet">
           {selectedJob && (
@@ -499,5 +498,103 @@ export default function PortalPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * My trail (plan D3 — gap item 3): the field beacon panel. Starts the GPS
+ * watch, POSTs pings to /api/telemetry/pings (geofences + live map on the
+ * server side), and keeps an offline outbox that drains on reconnect.
+ */
+function TrailPanel() {
+  const session = useSession();
+  const beacon = useBeacon(session?.id ?? null);
+  const statusCopy: Record<string, string> = {
+    idle: "Beacon off",
+    acquiring: "Acquiring GPS fix…",
+    live: "Broadcasting position",
+    denied: "Location permission denied",
+    unsupported: "This device has no geolocation",
+    error: "Location error",
+  };
+  const live = beacon.status === "live";
+
+  return (
+    <section className="panel jobs-panel">
+      <div className="panel-head">
+        <div>
+          <h2>My trail beacon</h2>
+          <p>
+            {beacon.deviceLabel
+              ? `Device · ${beacon.deviceLabel}`
+              : beacon.deviceId
+                ? "Registered device found"
+                : "No registered device — ask an admin to add one on the Devices page"}
+          </p>
+        </div>
+        <span
+          className={"status " + (live ? "status-in-progress" : "status-scheduled")}
+          style={{ textTransform: "none" }}
+        >
+          <span />
+          {statusCopy[beacon.status] ?? beacon.status}
+        </span>
+      </div>
+
+      <div className="dashboard-grid" style={{ gridTemplateColumns: "minmax(0,1fr)" }}>
+        <section className="panel" style={{ gap: 12 }}>
+          <div className="flex flex-wrap items-center gap-3">
+            {live ? (
+              <Button variant="outline" onClick={beacon.stop}>
+                Stop beacon
+              </Button>
+            ) : (
+              <Button onClick={beacon.start} disabled={!session || beacon.status === "acquiring"}>
+                Start beacon
+              </Button>
+            )}
+            {beacon.queued > 0 && (
+              <Button variant="ghost" onClick={() => void beacon.drain()}>
+                Retry {beacon.queued} queued ping{beacon.queued === 1 ? "" : "s"}
+              </Button>
+            )}
+          </div>
+
+          {beacon.error && <p className="text-sm text-destructive">{beacon.error}</p>}
+
+          <div className="detail-grid" style={{ gridTemplateColumns: "repeat(2, minmax(0,1fr))" }}>
+            <div className="detail-block">
+              <span>LATITUDE</span>
+              <strong>{beacon.fix ? beacon.fix.lat.toFixed(5) : "—"}</strong>
+            </div>
+            <div className="detail-block">
+              <span>LONGITUDE</span>
+              <strong>{beacon.fix ? beacon.fix.lng.toFixed(5) : "—"}</strong>
+            </div>
+            <div className="detail-block">
+              <span>ACCURACY</span>
+              <strong>{beacon.fix?.accuracy ? `${Math.round(beacon.fix.accuracy)} m` : "—"}</strong>
+            </div>
+            <div className="detail-block">
+              <span>LAST FIX</span>
+              <strong>{beacon.fix ? new Date(beacon.fix.at).toLocaleTimeString() : "—"}</strong>
+            </div>
+            <div className="detail-block">
+              <span>PINGS SENT</span>
+              <strong>{beacon.sent}</strong>
+            </div>
+            <div className="detail-block">
+              <span>QUEUED OFFLINE</span>
+              <strong>{beacon.queued}</strong>
+            </div>
+          </div>
+
+          <p className="text-sm text-muted-foreground">
+            Pings land in the admin live map and geofence log — the trail replays day by day. Keep
+            this page open while on shift; queued pings send automatically when coverage returns.
+          </p>
+        </section>
+      </div>
+    </section>
   );
 }

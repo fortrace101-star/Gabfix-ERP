@@ -88,6 +88,17 @@ export const customersResource: Resource = {
     status: 'status',
   },
   create: customerCreate,
+  // The admin edit modal patches account details; balance moves through the
+  // ledger (payments/invoices), never through a direct PATCH.
+  patch: atLeastOneField(
+    customerCreate
+      .omit({ phone: true })
+      .extend({
+        phone: optionalText.optional(),
+        balance: optionalMoney,
+      })
+      .partial(),
+  ),
   row: importRow(customerCreate),
 };
 

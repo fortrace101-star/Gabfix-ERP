@@ -23,6 +23,8 @@ import { telemetryRouter } from './routes/telemetry';
 import { employeesRouter } from './routes/employees';
 import { settingsRouter } from './routes/settings';
 import { storeRouter } from './routes/store';
+import { devicesRouter } from './routes/devices';
+import { syncRouter } from './routes/sync';
 import { jobStatusRouter } from './routes/job-status';
 import { guard, requireScope } from './middleware/auth';
 import { requestLogger } from './middleware/requestLogger';
@@ -67,6 +69,12 @@ app.get('/api/health', (_req, res) => {
 // requireAuth), so they mount before the staged guard.
 app.use('/api/auth', authRouter);
 
+// SSE mounts before the guard too: EventSource cannot send an Authorization
+// header, so the router itself promotes ?access_token= and then runs the same
+// requireAuth + requireScope chain — a query-only token would otherwise 401
+// at guard() before the promotion ever runs.
+app.use('/api/events', eventsRouter);
+
 // Staged enforcement: a no-op until AUTH_ENFORCE=true, which Phase 0.10 flips
 // once the login screen ships. Owner-only routes add guard('owner') on top.
 app.use('/api', guard());
@@ -89,7 +97,6 @@ app.use('/api/documents', scoped('admin', 'laundry', 'store', 'portal'), documen
 app.use('/api/expenses', scoped('admin', 'laundry', 'store', 'portal'), expensesRouter);
 app.use('/api/services', scoped('admin', 'laundry', 'store', 'portal'), servicesRouter);
 app.use('/api/inventory', scoped('admin', 'laundry', 'store'), inventoryRouter);
-app.use('/api/events', eventsRouter); // SSE stream (Phase 0.11)
 app.use('/api/logs', logsRouter);     // GET /api/logs — request log history (admin)
 app.use('/api', adminRouter); // POST /api/import, POST /api/reset (owner-only inside)
 
@@ -103,6 +110,10 @@ app.use('/api/employees', scoped('admin'), employeesRouter);
 app.use('/api/settings', scoped('admin'), settingsRouter);
 // Store operations (plan v5 E2–E5): movements, tools, purchase requests, utilities.
 app.use('/api/store', scoped('admin', 'store'), storeRouter);
+// Devices registry (plan §6.3): admin control plane for the beacon hardware.
+app.use('/api/devices', scoped('admin'), devicesRouter);
+// Offline sync (plan C1): laundry front office outbox drain + delta pull.
+app.use('/api/sync', scoped('admin', 'laundry'), syncRouter);
 // Feedback links are shared via email/WhatsApp — mount public routes outside guard.
 app.use('/', notificationsRouter);
 

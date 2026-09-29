@@ -8,14 +8,16 @@ import { publish } from '../services/realtime';
 
 /**
  * Store operations (plan v5 Phase E). Reads come from /api/data; these are the
- * four write paths the storekeeper UI needs:
+ * write paths the storekeeper UI needs:
  *   POST /api/store/movements            — receive/issue/adjust/return (+ qty delta on the item)
  *   PATCH /api/store/tools/:id           — check-out/in, condition, holder, job, due-back
  *   POST /api/store/purchase-requests    — raise a request (admin approves via PATCH)
  *   PATCH /api/store/purchase-requests/:id — approve/reject (admin) — SSE `purchase.approved`
  *   POST /api/store/utility-captures     — meter/slip capture (status Quarantined until posted)
+ *   GET  /api/store/utility-captures     — capture list (optional ?status= filter)
+ *   POST /api/store/utility-captures/:id/post — Admin one-click: quarantine → expense row
  * Movement qty updates run inside a transaction; utilities land Quarantined so
- * Admin posting to /api/expenses stays an explicit, auditable step.
+ * Admin posting to the ledger stays an explicit, auditable step.
  */
 
 export const storeRouter = Router();
@@ -182,6 +184,79 @@ storeRouter.patch('/purchase-requests/:id', async (req: Request, res: Response) 
     publish({ type: 'purchase-approved', by: req.user?.name, payload: rows[0] });
   } catch (error) {
     fail(res, error, 'Purchase decision failed');
+  }
+});
+
+/** GET /api/store/utility-captures — capture list, newest first (?status= filters). */
+storeRouter.get('/utility-captures', async (req: Request, res: Response) => {
+  const status = typeof req.query.status === 'string' ? req.query.status : '';
+  const params: unknown[] = [];
+  let where = '';
+  if (status) {
+    params.push(status);
+    where = `WHERE status = $${params.length}`;
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, captured_on::text AS "capturedOn", type, reference, reading,
+              amount::float8 AS amount, category_kind AS "categoryKind",
+              captured_by AS "capturedBy", status, expense_id AS "expenseId"
+       FROM utility_captures ${where}
+       ORDER BY captured_on DESC, id DESC`,
+      params,
+    );
+    res.json(rows);
+  } catch (error) {
+    fail(res, error, 'Could not load utility captures');
+  }
+});
+
+/** POST /api/store/utility-captures/:id/post — one-click quarantine → ledger. */
+storeRouter.post('/utility-captures/:id/post', async (req: Request, res: Response) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Lock the row so two admins cannot double-post the same slip.
+    const capture = await client.query(
+      `SELECT id, captured_on, type, reference, reading, amount, category_kind, status
+       FROM utility_captures WHERE id = $1 FOR UPDATE`,
+      [req.params.id],
+    );
+    if (!capture.rows.length) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Utility capture not found' });
+      return;
+    }
+    const row = capture.rows[0];
+    if (row.status !== 'Quarantined') {
+      await client.query('ROLLBACK');
+      res.status(409).json({ error: `Capture is ${row.status}, only Quarantined captures can be posted` });
+      return;
+    }
+    // The expense mirrors the capture: category = utility type, division from
+    // the capture's cost classification, date = the day it was captured.
+    // expenses.id carries no default — generate the same shape createHandler does.
+    const division = row.category_kind === 'direct' ? 'direct' : 'operations';
+    const description = `${row.type} · ${row.reference}${row.reading ? ` (${row.reading})` : ''}`;
+    const expenseId = `e${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    await client.query(
+      `INSERT INTO expenses (id, category, description, amount, date, division)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [expenseId, row.type, description, row.amount, row.captured_on, division],
+    );
+    await client.query(
+      `UPDATE utility_captures SET status = 'Approved', expense_id = $2 WHERE id = $1`,
+      [req.params.id, expenseId],
+    );
+    await client.query('COMMIT');
+    res.status(201).json({ id: req.params.id, status: 'Approved', expenseId });
+    // The ledger changed — every console listening refreshes.
+    publish({ type: 'expense-created', by: req.user?.name, payload: { expenseId } });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    fail(res, error, 'Posting utility capture failed');
+  } finally {
+    client.release();
   }
 });
 

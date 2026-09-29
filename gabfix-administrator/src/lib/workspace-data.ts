@@ -18,6 +18,7 @@ export type Workspace = {
   payments: Array<{ id: string; number: string; amount: number; methodId: string | null; invoiceId: string | null; laundryOrderId: string | null; status: string; receivedAt: string }>;
   suppliers: Array<{ id: string; name: string; phone: string; contact: string | null; categories: string | null; spendYtd: number | null; rating: string | null }>;
   purchaseRequests: Array<{ id: string; description: string; qty: number; supplierId: string | null; value: number; requestedBy: string; requestedOn: string; status: string }>;
+  utilityCaptures: Array<{ id: string; capturedOn: string; type: string; reference: string; reading: string; amount: number; categoryKind: string; capturedBy: string; status: string; expenseId: string | null }>;
 };
 
 export function useWorkspaceData() {
@@ -53,7 +54,7 @@ export function useWorkspaceSse(onEvent: () => void) {
       "job-created", "job-updated", "customer-created", "expense-created",
       "equipment-created", "equipment-updated", "inventory-created", "inventory-updated",
       "payment-created", "laundry-updated", "purchase-created", "purchase-approved",
-      "store-updated", "workspace-reset", "employees-updated", "settings-updated",
+      "store-updated", "workspace-reset", "employees-updated", "settings-updated", "expense-created",
     ]) {
       es.addEventListener(type, onEvent);
     }

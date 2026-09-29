@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Toaster } from "@/components/ui/sonner";
 import { laundryDb, queueOrder, type CachedOrder, type OrderStatus } from "@/lib/offline-db";
+import { drainOutbox, pullServerDelta } from "@/lib/sync";
 import { useLaundryWorkspace } from "@/lib/workspace";
 
 // Server laundry orders are pulled live (A6) and mapped onto CachedOrder below.
@@ -63,6 +64,44 @@ export function LaundryDashboard({ active }: { active: string }) {
   const [selected, setSelected] = useState<CachedOrder | null>(null);
   const [query, setQuery] = useState("");
   const [online, setOnline] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<string>("");
+
+  // Outbox drain (plan C1): on mount, when the connection returns, and on a
+  // 30s cadence while online — the queue empties itself without a manual step.
+  const runSync = async () => {
+    if (!laundryApi.isConfigured || syncing) return;
+    setSyncing(true);
+    try {
+      const result = await drainOutbox();
+      if (result.pushed > 0) toast.success(`Synced ${result.pushed} action${result.pushed === 1 ? "" : "s"}`);
+      setLastSync(new Date().toLocaleTimeString());
+    } catch {
+      /* stays queued; the next cadence retries */
+    } finally {
+      setSyncing(false);
+    }
+  };
+  useEffect(() => {
+    void runSync();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (online) void runSync();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online]);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (navigator.onLine) void runSync();
+    }, 30_000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // Keep the board fresh from the server after every successful drain.
+  useEffect(() => {
+    if (!waiting) pullServerDelta().catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waiting]);
 
   useEffect(() => {
     setOnline(navigator.onLine);
@@ -375,7 +414,9 @@ export function LaundryDashboard({ active }: { active: string }) {
           )}
           {active === "inventory" && <InventoryTable />}
           {active === "expenses" && <ExpensePanel />}
-          {active === "sync" && <SyncPanel waiting={waiting} online={online} />}
+          {active === "sync" && (
+            <SyncPanel waiting={waiting} online={online} onSync={runSync} syncing={syncing} lastSync={lastSync} />
+          )}
           {active === "settings" && <SettingsPanel />}
         </main>
       </div>
@@ -627,7 +668,19 @@ function ExpensePanel() {
     </div>
   );
 }
-function SyncPanel({ waiting, online }: { waiting: number; online: boolean }) {
+function SyncPanel({
+  waiting,
+  online,
+  onSync,
+  syncing,
+  lastSync,
+}: {
+  waiting: number;
+  online: boolean;
+  onSync: () => void;
+  syncing: boolean;
+  lastSync: string;
+}) {
   return (
     <section className="max-w-3xl rounded-md border border-border bg-card p-6">
       <div className="flex items-start gap-4">
@@ -644,13 +697,16 @@ function SyncPanel({ waiting, online }: { waiting: number; online: boolean }) {
             {waiting} action{waiting === 1 ? "" : "s"} waiting to sync. Draft numbers upgrade
             automatically after acknowledgement.
           </p>
+          <Button className="mt-4" onClick={onSync} disabled={syncing || !online}>
+            {syncing ? "Syncing…" : "Sync now"}
+          </Button>
         </div>
       </div>
       <div className="mt-6 grid gap-3 sm:grid-cols-3">
         {[
           ["Queued", waiting],
           ["Failed", 0],
-          ["Last sync", "10:03"],
+          ["Last sync", lastSync || "—"],
         ].map(([k, v]) => (
           <div key={k} className="rounded-md border border-border p-4">
             <p className="text-xs text-muted-foreground">{k}</p>
