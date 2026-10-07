@@ -18,12 +18,15 @@ type Settings = {
   emailEnabled: boolean;
   appreciationDelayHours: number;
   feedbackRetentionDays: number;
+  pushEnabled: boolean;
+  vapidPublicKey: string;
 };
 
 const FLAGS: Array<{ key: keyof Settings; label: string; hint: string }> = [
   { key: "whatsappEnabled", label: "WhatsApp", hint: "Send appreciation + feedback via WhatsApp (needs credentials)" },
   { key: "smsEnabled", label: "SMS", hint: "Fallback text channel (Africa's Talking)" },
   { key: "emailEnabled", label: "Email", hint: "Email receipts and feedback links (SMTP)" },
+  { key: "pushEnabled", label: "Web Push", hint: "Deliver notifications to service workers across all four apps (needs VAPID keys)" },
 ];
 
 export function SettingsPage({ onBack }: { onBack?: () => void }) {
@@ -189,6 +192,39 @@ export function SettingsPage({ onBack }: { onBack?: () => void }) {
                       }
                     }}
                   />
+                </label>
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-border bg-card p-5">
+              <h2 className="mb-4 text-base font-semibold">Web Push</h2>
+              <p className="mb-4 text-xs text-muted-foreground">
+                Delivers notifications to service workers across all four apps.
+                Generate VAPID keys once from the server console (logged on
+                startup) and paste the public key here.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium">Push enabled</span>
+                  <Switch
+                    checked={Boolean(settings.pushEnabled)}
+                    disabled={saving}
+                    onCheckedChange={(checked) => save({ pushEnabled: checked } as Partial<Settings>)}
+                  />
+                </label>
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium">VAPID public key</span>
+                  <Input
+                    defaultValue={settings.vapidPublicKey}
+                    onBlur={(e) =>
+                      e.target.value !== settings.vapidPublicKey &&
+                      save({ vapidPublicKey: e.target.value })
+                    }
+                    placeholder="URL-safe base64 (from server console)"
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    Leave empty to use the server-managed key (if configured).
+                  </span>
                 </label>
               </div>
             </section>

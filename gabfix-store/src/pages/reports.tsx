@@ -16,13 +16,9 @@ import { StatusBadge } from "@/components/store/StatusBadge";
 import { StoreButton } from "@/components/store/StoreButton";
 import {
   compactCurrency,
-  costPerJob,
-  lowStockItems,
-  movements,
-  purchaseRequests,
-  stockValuation,
   type Movement,
 } from "@/lib/store-data";
+import { useDerived } from "@/lib/workspace";
 import { useDocumentTitle } from "@/lib/use-document-title";
 
 const ledgerColumns: Column<Movement>[] = [
@@ -81,9 +77,9 @@ const documents = [
   { id: "d1", name: "Goods received note", hint: "GRN-0421 · Tilemart Nakawa" },
   { id: "d2", name: "Materials issued slip", hint: "JOB-1184 · Ntinda villa" },
   { id: "d3", name: "Stock list & valuation", hint: "As at 28 September 2026" },
-  { id: "d4", name: "Low stock report", hint: `${lowStockItems.length} lines below reorder` },
+  { id: "d4", name: "Low stock report", hint: "Lines below reorder" },
   { id: "d5", name: "Expense slip pack", hint: "Utilities awaiting approval" },
-  { id: "d6", name: "Request status report", hint: `${purchaseRequests.length} requests` },
+  { id: "d6", name: "Request status report", hint: "Purchase requests" },
 ];
 
 function ReportsPage() {
@@ -91,6 +87,24 @@ function ReportsPage() {
     "Reports & documents — Gabfix Store",
     "Movement ledger, low-stock and request status reports, plus goods-received, issue and expense slip documents for Gabfix Store.",
   );
+
+  const { ws, stockValuation, lowStockItems, costPerJob } = useDerived();
+  const { movements, purchaseRequests } = ws;
+
+  if (ws.loading) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center" role="status" aria-label="Loading store data">
+        <div className="size-8 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary" />
+      </div>
+    );
+  }
+  if (ws.error) {
+    return (
+      <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted-foreground">
+        Could not load store data: {ws.error}
+      </div>
+    );
+  }
 
   return (
     <>

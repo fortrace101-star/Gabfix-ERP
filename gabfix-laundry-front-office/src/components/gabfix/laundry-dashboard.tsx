@@ -3,7 +3,6 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
-  Bell,
   Boxes,
   ChevronDown,
   CircleDollarSign,
@@ -24,21 +23,24 @@ import {
   X,
 } from "lucide-react";
 import { laundryApi } from "@/lib/api";
+import { BellPanel } from "@/components/gabfix/BellPanel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Toaster } from "@/components/ui/sonner";
 import { laundryDb, queueOrder, type CachedOrder, type OrderStatus } from "@/lib/offline-db";
 import { drainOutbox, pullServerDelta } from "@/lib/sync";
 import { useLaundryWorkspace } from "@/lib/workspace";
+import { useSession } from "@/lib/session";
 
 // Server laundry orders are pulled live (A6) and mapped onto CachedOrder below.
-const stock = [
-  { name: "Laundry detergent", category: "Consumable", qty: 18, min: 12, unit: "L", value: 684000 },
-  { name: "Fabric softener", category: "Consumable", qty: 7, min: 10, unit: "L", value: 266000 },
-  { name: "Garment bags", category: "Packaging", qty: 42, min: 50, unit: "pcs", value: 126000 },
-  { name: "Receipt rolls", category: "Supply", qty: 16, min: 8, unit: "rolls", value: 96000 },
-  { name: "Washer belt A42", category: "Spare", qty: 3, min: 2, unit: "pcs", value: 210000 },
-];
+const money = (amount: number) => `UGX ${amount.toLocaleString("en-UG")}`;
+const label = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
+
+/** Facility consumable row from /api/data (kind='facility' inventory, C5). */
+type FacilityItem = { id: string; name: string; category: string; unit: string; quantity: number; minimum: number; cost: number };
+
+/** Facility expense row for the C5 list (laundry-relevant expenses). */
+type FacilityExpense = { id: string; category: string; description: string; amount: number; date: string; division: string };
 const nav: ReadonlyArray<readonly [string, string, ComponentType<{ className?: string }>]> = [
   ["overview", "Overview", Gauge],
   ["orders", "Laundry orders", ClipboardList],
@@ -50,11 +52,10 @@ const nav: ReadonlyArray<readonly [string, string, ComponentType<{ className?: s
   ["settings", "Settings", Settings],
 ] as const;
 const statuses: OrderStatus[] = ["received", "washing", "drying", "ready", "collected"];
-const money = (amount: number) => `UGX ${amount.toLocaleString("en-UG")}`;
-const label = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
 
 export function LaundryDashboard({ active }: { active: string }) {
   const navigate = useNavigate();
+  const session = useSession();
   const cachedOrders = useLiveQuery(() => laundryDb.orders_cache.toArray(), []) ?? [];
   const waiting = useLiveQuery(() => laundryDb.outbox.count(), []) ?? 0;
   const serverOrders = useLaundryWorkspace();
@@ -66,6 +67,25 @@ export function LaundryDashboard({ active }: { active: string }) {
   const [online, setOnline] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [lastSync, setLastSync] = useState<string>("");
+  // Facility consumables + expenses (plan v5 C5) from /api/data.
+  const [facilityInventory, setFacilityInventory] = useState<FacilityItem[]>([]);
+  const [facilityExpenses, setFacilityExpenses] = useState<FacilityExpense[]>([]);
+  const [expenseSaving, setExpenseSaving] = useState(false);
+
+  const loadFacilityData = () => {
+    if (!laundryApi.isConfigured) return;
+    laundryApi
+      .get<{
+        inventory: FacilityItem[];
+        expenses: FacilityExpense[];
+      }>("/data")
+      .then((ws) => {
+        setFacilityInventory(ws.inventory.filter((item) => item.quantity !== undefined));
+        setFacilityExpenses(ws.expenses.slice(0, 12));
+      })
+      .catch(() => undefined);
+  };
+  useEffect(loadFacilityData, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Outbox drain (plan C1): on mount, when the connection returns, and on a
   // 30s cadence while online — the queue empties itself without a manual step.
@@ -142,16 +162,19 @@ export function LaundryDashboard({ active }: { active: string }) {
   const ready = orders.filter((order) => order.status === "ready").length;
   const overdue = orders.filter(
     (order) =>
-      order.status !== "collected" && new Date(order.dueAt) < new Date("2026-09-28T10:07:00.000Z"),
+      order.status !== "collected" &&
+      order.dueAt &&
+      new Date(order.dueAt).getTime() < Date.now(),
   ).length;
+  const lowStock = facilityInventory.filter((item) => item.quantity <= item.minimum).length;
   const kpis: ReadonlyArray<
     readonly [string, string | number, ComponentType<{ className?: string }>]
   > = [
     ["Active orders", orders.filter((order) => order.status !== "collected").length, ClipboardList],
     ["Ready to collect", ready, PackageCheck],
     ["Overdue", overdue, History],
-    ["Low stock", 2, Boxes],
-    ["Inventory value", money(1382000), CircleDollarSign],
+    ["Low stock", lowStock, Boxes],
+    ["Inventory value", money(facilityInventory.reduce((sum, item) => sum + item.quantity * item.cost, 0)), CircleDollarSign],
   ];
 
   async function signOut() {
@@ -326,8 +349,8 @@ export function LaundryDashboard({ active }: { active: string }) {
               GA
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">Grace Atim</p>
-              <p className="text-xs text-sidebar-muted">Counter operator</p>
+              <p className="truncate text-sm font-semibold">{session?.name ?? "—"}</p>
+              <p className="text-xs text-sidebar-muted">{session?.role ?? "Counter operator"}</p>
             </div>
             <Button variant="ghost" size="icon" onClick={signOut} title="Sign out">
               <UserRound />
@@ -362,9 +385,7 @@ export function LaundryDashboard({ active }: { active: string }) {
               {online ? `Last synced · ${waiting} waiting` : `Offline · ${waiting} waiting`}
             </span>
           </div>
-          <Button variant="ghost" size="icon" title="Notifications">
-            <Bell />
-          </Button>
+          <BellPanel />
         </header>
         <main className="p-4 md:p-8">
           <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
@@ -374,7 +395,11 @@ export function LaundryDashboard({ active }: { active: string }) {
               </p>
               <h1 className="text-2xl font-bold md:text-3xl">
                 {active === "overview"
-                  ? "Good afternoon, Grace"
+                  ? (
+                    <>
+                      Good afternoon, {session?.name ?? "there"}
+                    </>
+                  )
                   : (nav.find(([key]) => key === active)?.[1] ?? "Laundry operations")}
               </h1>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -412,8 +437,23 @@ export function LaundryDashboard({ active }: { active: string }) {
               onSelect={setSelected}
             />
           )}
-          {active === "inventory" && <InventoryTable />}
-          {active === "expenses" && <ExpensePanel />}
+          {active === "inventory" && <InventoryTable items={facilityInventory} />}
+          {active === "expenses" && (
+            <ExpensePanel
+              expenses={facilityExpenses}
+              saving={expenseSaving}
+              onSubmit={async (input) => {
+                setExpenseSaving(true);
+                try {
+                  await laundryApi.request("/expenses", { method: "POST", body: JSON.stringify(input) });
+                  toast.success("Expense recorded");
+                  loadFacilityData();
+                } finally {
+                  setExpenseSaving(false);
+                }
+              }}
+            />
+          )}
           {active === "sync" && (
             <SyncPanel waiting={waiting} online={online} onSync={runSync} syncing={syncing} lastSync={lastSync} />
           )}
@@ -533,6 +573,13 @@ function OrderTable({
                 </td>
               </tr>
             ))}
+            {orders.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-5 py-10 text-center text-sm text-muted-foreground">
+                  No orders in this view yet — "New intake" records the first one (works offline).
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -575,75 +622,87 @@ function StatusBoard({
                   </p>
                 </button>
               ))}
+            {orders.filter((o) => o.status === status).length === 0 && (
+              <p className="rounded-md border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+                Nothing here — move an order to {label(status)} from its drawer.
+              </p>
+            )}
           </div>
         </section>
       ))}
     </div>
   );
 }
-function InventoryTable() {
+function InventoryTable({ items }: { items: FacilityItem[] }) {
   return (
     <section className="overflow-hidden rounded-md border border-border bg-card">
       <div className="flex items-center justify-between border-b border-border p-5">
         <div>
           <h2 className="font-semibold">Facility stock</h2>
           <p className="text-xs text-muted-foreground">
-            Consumables, packaging, supplies, and spares
+            Live from the store's inventory (facility rows) — low stock highlights at the reorder point
           </p>
         </div>
-        <Button>
-          <Plus />
-          Stock movement
-        </Button>
       </div>
       <div className="divide-y divide-border">
-        {stock.map((item) => (
-          <div key={item.name} className="grid grid-cols-[1fr_auto] gap-4 p-5 md:grid-cols-5">
+        {items.map((item) => (
+          <div key={item.id} className="grid grid-cols-[1fr_auto] gap-4 p-5 md:grid-cols-5">
             <div className="md:col-span-2">
               <p className="font-semibold">{item.name}</p>
               <p className="text-xs text-muted-foreground">{item.category}</p>
             </div>
             <p className="text-sm">
-              <strong>{item.qty}</strong> {item.unit}
+              <strong>{item.quantity}</strong> {item.unit}
             </p>
-            <p className="text-sm text-muted-foreground">Reorder at {item.min}</p>
+            <p className="text-sm text-muted-foreground">Reorder at {item.minimum}</p>
             <div className="text-right">
-              <p className="font-semibold">{money(item.value)}</p>
-              {item.qty <= item.min && (
+              <p className="font-semibold">{money(item.quantity * item.cost)}</p>
+              {item.quantity <= item.minimum && (
                 <span className="status-pill status-overdue">Low stock</span>
               )}
             </div>
           </div>
         ))}
+        {items.length === 0 && (
+          <p className="p-10 text-center text-sm text-muted-foreground">
+            No facility stock rows yet — consumables added to the store's inventory (kind "facility") appear here.
+          </p>
+        )}
       </div>
     </section>
   );
 }
-function ExpensePanel() {
+function ExpensePanel({
+  expenses,
+  saving,
+  onSubmit,
+}: {
+  expenses: FacilityExpense[];
+  saving: boolean;
+  onSubmit: (input: { category: string; description: string; amount: number; division: string }) => Promise<void>;
+}) {
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
       <section className="rounded-md border border-border bg-card p-5">
         <h2 className="font-semibold">Facility expenses</h2>
+        <p className="text-xs text-muted-foreground">Live from the ledger — operations and direct-division rows.</p>
         <div className="mt-5 space-y-3">
-          {[
-            ["Generator fuel", "Operations", "UGX 180,000", "Pending"],
-            ["Express order detergent", "Direct job cost", "UGX 74,000", "Approved"],
-            ["Dryer maintenance", "Operations", "UGX 320,000", "Pending"],
-          ].map((row) => (
-            <div
-              key={row[0]}
-              className="flex items-center justify-between rounded-md border border-border p-4"
-            >
+          {expenses.map((expense) => (
+            <div key={expense.id} className="flex items-center justify-between rounded-md border border-border p-4">
               <div>
-                <p className="font-semibold">{row[0]}</p>
-                <p className="text-xs text-muted-foreground">{row[1]}</p>
+                <p className="font-semibold">{expense.description || expense.category}</p>
+                <p className="text-xs text-muted-foreground">
+                  {expense.category} · {expense.date}
+                </p>
               </div>
-              <div className="text-right">
-                <p className="font-semibold">{row[2]}</p>
-                <span className="text-xs text-primary">{row[3]}</span>
-              </div>
+              <p className="font-semibold">{money(expense.amount)}</p>
             </div>
           ))}
+          {expenses.length === 0 && (
+            <p className="rounded-md border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+              No expenses recorded yet — capture the first slip on the right.
+            </p>
+          )}
         </div>
       </section>
       <section className="rounded-md border border-border bg-card p-5">
@@ -652,17 +711,26 @@ function ExpensePanel() {
           className="mt-4 space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
-            toast.success("Expense queued for approval");
+            const fd = new FormData(e.currentTarget);
+            const division = String(fd.get("division"));
+            void onSubmit({
+              category: String(fd.get("category")) || "Facility",
+              description: String(fd.get("description")),
+              amount: Number(fd.get("amount")),
+              division,
+            }).catch((err: unknown) => toast.error(err instanceof Error ? err.message : "Could not record the expense"));
           }}
         >
-          <select className="field">
-            <option>Operations (Category 4)</option>
-            <option>Direct job cost (Category 1)</option>
+          <select name="division" className="field" defaultValue="operations">
+            <option value="operations">Operations (Category 4)</option>
+            <option value="direct">Direct job cost (Category 1)</option>
           </select>
-          <Input placeholder="Description" required />
-          <Input type="number" placeholder="Amount (UGX)" required />
-          <Input type="file" accept="image/*" />
-          <Button className="w-full">Submit expense</Button>
+          <Input name="category" placeholder="Category label" required />
+          <Input name="description" placeholder="Description" required />
+          <Input name="amount" type="number" min="1" placeholder="Amount (UGX)" required />
+          <Button className="w-full" disabled={saving}>
+            {saving ? "Recording…" : "Submit expense"}
+          </Button>
         </form>
       </section>
     </div>

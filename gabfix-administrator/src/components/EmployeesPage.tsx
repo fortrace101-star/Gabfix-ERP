@@ -19,6 +19,8 @@ import {
 } from "@/components/ui/select";
 import { apiClient } from "@/lib/api";
 import { useDocumentTitle } from "@/lib/use-document-title";
+import { InviteCodeList } from "@/components/InviteCodeList";
+import { StaffAccessModal } from "@/components/StaffAccessModal";
 
 type Employee = {
   id: string;
@@ -40,6 +42,7 @@ const ROLES = [
   "laundry",
   "accountant",
   "storekeeper",
+  "csr",
 ] as const;
 
 const roleTone: Record<string, string> = {
@@ -56,6 +59,7 @@ export function EmployeesPage({ onBack }: { onBack?: () => void }) {
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // New-employee form state
   const [form, setForm] = useState({
@@ -164,10 +168,7 @@ export function EmployeesPage({ onBack }: { onBack?: () => void }) {
               <div className="grid grid-cols-2 gap-3">
                 <label className="block space-y-2">
                   <span className="text-sm font-medium">Role</span>
-                  <Select
-                    value={form.role}
-                    onValueChange={(role) => setForm({ ...form, role })}
-                  >
+                  <Select value={form.role} onValueChange={(role) => setForm({ ...form, role })}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -224,7 +225,11 @@ export function EmployeesPage({ onBack }: { onBack?: () => void }) {
                   ))}
                 </div>
               </div>
-              <Button className="w-full" onClick={createEmployee} disabled={saving || form.name.trim().length < 2}>
+              <Button
+                className="w-full"
+                onClick={createEmployee}
+                disabled={saving || form.name.trim().length < 2}
+              >
                 {saving ? <LoaderCircle className="animate-spin" /> : null}
                 Create employee
               </Button>
@@ -234,6 +239,17 @@ export function EmployeesPage({ onBack }: { onBack?: () => void }) {
       </header>
 
       <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">Staff &amp; access</h2>
+            <p className="text-sm text-muted-foreground">
+              Issue single-use account creation codes here; new hires sign up with the code and get the
+              exact scopes you grant.
+            </p>
+          </div>
+          <StaffAccessModal onGenerated={() => setRefreshKey((k) => k + 1)} />
+        </div>
+        <InviteCodeList refreshKey={refreshKey} />
         {error && (
           <p className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">
             {error}
@@ -257,7 +273,9 @@ export function EmployeesPage({ onBack }: { onBack?: () => void }) {
                       <p className="text-sm font-semibold">
                         {emp.name}
                         {!emp.active && (
-                          <span className="ml-2 text-xs font-medium text-destructive">inactive</span>
+                          <span className="ml-2 text-xs font-medium text-destructive">
+                            inactive
+                          </span>
                         )}
                       </p>
                       <p className="text-xs text-muted-foreground">

@@ -15,7 +15,7 @@ import { KpiCard, KpiStrip } from "@/components/store/KpiCard";
 import { PageHeader } from "@/components/store/PageHeader";
 import { StatusBadge } from "@/components/store/StatusBadge";
 import { StoreButton } from "@/components/store/StoreButton";
-import { compactCurrency, currency, stockStatus, throughput } from "@/lib/store-data";
+import { compactCurrency, currency, stockStatus } from "@/lib/store-data";
 import { useDerived, storeMutations } from "@/lib/workspace";
 import { MovementModal } from "@/components/store/StoreModals";
 import { useDocumentTitle } from "@/lib/use-document-title";
@@ -25,7 +25,7 @@ function Overview() {
     "Store overview — Gabfix Store",
     "Live stock valuation, low-stock alerts, tool check-outs and quarantined running costs for Gabfix Home Solutions.",
   );
-  const { ws, stockValuation, lowStockItems, toolsOut, quarantinedSpend } = useDerived();
+    const { ws, stockValuation, lowStockItems, toolsOut, quarantinedSpend, throughput } = useDerived();
   const movements = ws.movements;
   const [movementOpen, setMovementOpen] = useState(false);
   void storeMutations;
@@ -87,10 +87,8 @@ function Overview() {
         />
         <KpiCard
           label="Tools out"
-          value={`${toolsOut.length} / 7`}
-          hint="1 overdue return"
-          delta="Due today: 1"
-          deltaTone="neutral"
+          value={`${toolsOut.length} / ${ws.tools.length}`}
+          hint="Checked out or overdue"
           icon={Wrench}
         />
         <KpiCard
@@ -243,7 +241,7 @@ function Overview() {
             ))}
           </ul>
           <div className="border-t border-border px-5 py-3 text-xs text-muted-foreground">
-            Replacement value on loan: {currency(18400000)}
+            {toolsOut.length} {toolsOut.length === 1 ? "tool" : "tools"} on loan
           </div>
         </div>
       </div>

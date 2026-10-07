@@ -1,7 +1,5 @@
-# Gabfix Portal roadmap
-- [x] Build the branded responsive dashboard shell and reusable UI.
-- [x] Add role-scoped operational modules and interactions.
-- [x] Add employee authentication and protected profile/role storage.
-- [x] Add installable online-first PWA support with field-ping outbox.
-- [x] Add API boundary and document integration placeholders.
-- [x] Verify desktop/mobile behavior, metadata, and diagnostics.
+# Portal rebuild
+- [x] Inspect the uploaded app, theme images, layout guide, and layout references.
+- [x] Rebuild the employee portal screens and core preview interactions in the Gabfix theme.
+- [x] Verify desktop and mobile rendering and current preview diagnostics.
+- [ ] External staff API integration — blocked until the original service is connected or supplied.

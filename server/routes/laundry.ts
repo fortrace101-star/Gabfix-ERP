@@ -1,8 +1,10 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
+import { pool } from '../db';
 import { parseBody } from '../validation/common';
 import { laundryIntakeCreate, laundryStatusPatch } from '../validation/laundry';
 import { createLaundryOrder, updateLaundryStatus } from '../services/laundry';
+import { dispatchEvent } from '../services/notifications';
 import { fail } from '../lib/http';
 import { publish } from '../services/realtime';
 
@@ -34,6 +36,19 @@ laundryRouter.patch('/:id/status', async (req: Request, res: Response) => {
     const result = await updateLaundryStatus(orderId, body.status);
     res.json(result);
     publish({ type: 'laundry-updated', by: req.user?.name });
+    // Reaching Ready (or past it) rings the customer + admin bell (plan v5 F3).
+    if (body.status === 'Ready' || body.status === 'Collected') {
+      const client = await pool.connect();
+      try {
+        await dispatchEvent(client, {
+          type: body.status === 'Ready' ? 'laundry.ready' : 'laundry.collected',
+          entityType: 'laundry_orders',
+          entityId: orderId,
+        });
+      } finally {
+        client.release();
+      }
+    }
   } catch (error) {
     fail(res, error, 'Status change failed');
   }

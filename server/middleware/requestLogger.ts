@@ -18,13 +18,20 @@ const SKIP_PATHS = new Set(['/api/health']);
 
 export function requestLogger() {
   return (req: Request, res: Response, next: NextFunction): void => {
+    // Arrival: log EVERY request (health checks included) the moment it
+    // reaches the server — including requests that never finish, e.g. while
+    // waiting on an exhausted DB pool. Without this a hung request leaves no
+    // trace. The ring-buffer/SSE feed below still skips health checks.
+    const url = req.originalUrl || req.url;
+    const arrivalAppId = (req.headers['x-app-id'] as string) || '-';
+    console.log(`[req] ${req.method} ${url} ${arrivalAppId} <- ${req.ip || req.socket.remoteAddress || '?'}`);
+
     if (SKIP_PATHS.has(req.path)) {
       next();
       return;
     }
 
     const start = process.hrtime.bigint();
-    const url = req.originalUrl || req.url;
 
     res.on('finish', () => {
       const elapsedNs = Number(process.hrtime.bigint() - start);

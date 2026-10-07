@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { AdminDashboard } from "@/components/admin-dashboard";
 import { RequestLogsPage } from "@/components/RequestLogsPage";
 import { EmployeesPage } from "@/components/EmployeesPage";
+import { PermissionMatrixPage } from "@/components/PermissionMatrixPage";
 import { SettingsPage } from "@/components/SettingsPage";
 import { DispatchPage } from "@/components/DispatchPage";
 import { FinancePage } from "@/components/FinancePage";
@@ -104,6 +105,10 @@ function EmployeesRoute() {
   return <EmployeesPage onBack={() => window.history.back()} />;
 }
 
+function PermissionMatrixRoute() {
+  return <PermissionMatrixPage onBack={() => window.history.back()} />;
+}
+
 function SettingsRoute() {
   return <SettingsPage onBack={() => window.history.back()} />;
 }
@@ -157,6 +162,7 @@ export default function App() {
             <Route path="/devices" element={<ProtectedRoute><DevicesPage onBack={back} /></ProtectedRoute>} />
             <Route path="/inventory" element={<ProtectedRoute><InventoryPage onBack={back} /></ProtectedRoute>} />
             <Route path="/assets" element={<ProtectedRoute><AssetsPage onBack={back} /></ProtectedRoute>} />
+            <Route path="/permission-matrix" element={<ProtectedRoute><PermissionMatrixRoute /></ProtectedRoute>} />
             <Route path="/messages" element={<ProtectedRoute><MessagesPage onBack={back} /></ProtectedRoute>} />
             <Route path="/sync-health" element={<ProtectedRoute><SyncHealthPage onBack={back} /></ProtectedRoute>} />
           </Routes>

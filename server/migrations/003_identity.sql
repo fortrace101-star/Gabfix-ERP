@@ -7,7 +7,7 @@
 CREATE TABLE IF NOT EXISTS employees (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK (role IN ('owner','manager','sales','technician','laundry','accountant')),
+  role TEXT NOT NULL CHECK (role IN ('owner','manager','sales','technician','laundry','accountant','csr')),
   phone TEXT NOT NULL DEFAULT '',
   email TEXT NOT NULL DEFAULT '',
   pin_hash TEXT,

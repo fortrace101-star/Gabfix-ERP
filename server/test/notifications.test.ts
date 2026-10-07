@@ -36,7 +36,7 @@ test('renderTemplate blanks out null and undefined values', () => {
 test('pickChannels prefers WhatsApp when enabled and configured', () => {
   const settings: Settings = {
     company_name: 'Gabfix', company_phone: '', whatsapp_enabled: true, sms_enabled: true,
-    email_enabled: true, appreciation_delay_hours: 24, feedback_retention_days: 90,
+    email_enabled: true, push_enabled: false, appreciation_delay_hours: 24, feedback_retention_days: 90,
   };
   const channels = pickChannels(settings, true, true, true);
   assert.deepEqual(channels, ['whatsapp', 'inapp']);
@@ -45,7 +45,7 @@ test('pickChannels prefers WhatsApp when enabled and configured', () => {
 test('pickChannels falls back to SMS when WhatsApp is not enabled', () => {
   const settings: Settings = {
     company_name: 'Gabfix', company_phone: '', whatsapp_enabled: false, sms_enabled: true,
-    email_enabled: true, appreciation_delay_hours: 24, feedback_retention_days: 90,
+    email_enabled: true, push_enabled: false, appreciation_delay_hours: 24, feedback_retention_days: 90,
   };
   const channels = pickChannels(settings, true, true, true);
   assert.deepEqual(channels, ['sms', 'email', 'inapp']);
@@ -54,7 +54,7 @@ test('pickChannels falls back to SMS when WhatsApp is not enabled', () => {
 test('pickChannels always includes email and inapp when configured', () => {
   const settings: Settings = {
     company_name: 'Gabfix', company_phone: '', whatsapp_enabled: false, sms_enabled: false,
-    email_enabled: true, appreciation_delay_hours: 24, feedback_retention_days: 90,
+    email_enabled: true, push_enabled: false, appreciation_delay_hours: 24, feedback_retention_days: 90,
   };
   const channels = pickChannels(settings, false, false, true);
   assert.deepEqual(channels, ['email', 'inapp']);
@@ -63,7 +63,7 @@ test('pickChannels always includes email and inapp when configured', () => {
 test('pickChannels always includes inapp even with no providers', () => {
   const settings: Settings = {
     company_name: 'Gabfix', company_phone: '', whatsapp_enabled: true, sms_enabled: true,
-    email_enabled: true, appreciation_delay_hours: 24, feedback_retention_days: 90,
+    email_enabled: true, push_enabled: false, appreciation_delay_hours: 24, feedback_retention_days: 90,
   };
   const channels = pickChannels(settings, false, false, false);
   assert.deepEqual(channels, ['inapp']);

@@ -55,6 +55,30 @@ export async function ensureStaff(client: ClientBase): Promise<void> {
      ON CONFLICT (id) DO NOTHING`,
     [pinHash],
   );
+  // Repair stale empty app_scope for the seeded staff only (idempotent; never
+  // clobbers an admin-set non-empty scope). Mirrors migration 005's role->scope
+  // backfill so a server restart always self-heals DBs seeded before multi-app
+  // identity landed (the INSERT above uses ON CONFLICT DO NOTHING, so it cannot).
+  await client.query(
+    `UPDATE employees
+        SET app_scope = CASE role
+          WHEN 'owner'      THEN ARRAY['admin','laundry','portal','store']::TEXT[]
+          WHEN 'manager'    THEN ARRAY['admin','store']::TEXT[]
+          WHEN 'accountant' THEN ARRAY['admin','store']::TEXT[]
+          WHEN 'sales'      THEN ARRAY['portal']::TEXT[]
+          WHEN 'technician' THEN ARRAY['portal']::TEXT[]
+          WHEN 'laundry'    THEN ARRAY['laundry']::TEXT[]
+          WHEN 'storekeeper' THEN ARRAY['store']::TEXT[]
+          ELSE ARRAY[]::TEXT[]
+        END
+      WHERE id IN (
+        '00000000-0000-4000-8000-000000000010',
+        '00000000-0000-4000-8000-000000000011',
+        '00000000-0000-4000-8000-000000000012',
+        '00000000-0000-4000-8000-000000000013',
+        '00000000-0000-4000-8000-000000000014'
+      ) AND (app_scope IS NULL OR app_scope = '{}')`,
+  );
   console.log('[db] Demo staff ensured (password from STAFF_PASSWORD)');
 }
 
@@ -102,6 +126,18 @@ export async function seedData(client: ClientBase) {
       ('j5', 'JOB-00138', 'c3', 's5', '2026-09-01', 'Completed', 540000, 260000, '{"David T."}', '[]'),
       ('j6', 'JOB-00137', 'c8', 's6', '2026-08-31', 'Quoted', 780000, 320000, '{}', '[]')
      ON CONFLICT (id) DO NOTHING`
+    );
+
+  // Dual-write job_assignments from the legacy assignees names (migration 009
+  // strategy: the join table owns crew scoping now the portal reads it; the
+  // text[] column stays for the admin forms during the transition). Idempotent.
+  await client.query(
+    `INSERT INTO job_assignments (job_id, employee_id, role)
+      VALUES
+        ('j1', '00000000-0000-4000-8000-000000000013', 'technician'),
+        ('j3', '00000000-0000-4000-8000-000000000013', 'technician'),
+        ('j5', '00000000-0000-4000-8000-000000000013', 'technician')
+      ON CONFLICT (job_id, employee_id) DO NOTHING`
   );
 
   // Replicate the 009 backfill so /api/reset matches a migrated database:
@@ -173,6 +209,10 @@ export async function seedData(client: ClientBase) {
   // on fresh databases migration 016 seeds them.
   await seedStoreData(client);
 
+  // CRM slices (migration 021 tables) so a signed-in sales/CSR employee has
+  // leads and follow-ups to see. Migration-time seeds do not survive a reset.
+  await seedCrmData(client);
+
   // Platform provisioning from 014 — settings + message_templates are seeded by
   // the migration only when it first runs, but /api/reset truncates both tables.
   // Restore them here so a reset workspace stays fully provisioned.
@@ -210,8 +250,54 @@ async function seedPlatformData(client: ClientBase) {
        ARRAY['customer_name','service_name','date','balance','feedback_url'], TRUE),
       ('job_appreciation', 'inapp', NULL,
        'Thank you, {{customer_name}}! How was {{service_name}} on {{date}}? Rate us: {{feedback_url}}',
-       ARRAY['customer_name','service_name','date','feedback_url'], TRUE)
+       ARRAY['customer_name','service_name','date','feedback_url'], TRUE),
+      -- job.assigned: one in-app row per assignee (portal task list) plus the
+      -- push row for the store bell; without these the scheduler flips the
+      -- queued rows to 'failed' ("Template not found") and no bell shows them.
+      ('job_assigned', 'inapp', NULL,
+       'New job {{job_number}} — {{customer_name}} · {{service_name}} · {{scheduled}} {{address}}',
+       ARRAY['job_number','customer_name','service_name','scheduled','address'], TRUE),
+      ('job_assigned', 'push', NULL,
+       'New job {{job_number}} — {{customer_name}}',
+       ARRAY['job_number','customer_name','service_name','scheduled','address'], TRUE)
      ON CONFLICT (key, channel) DO NOTHING`,
+  );
+}
+
+/**
+ * CRM dataset (leads + follow-ups). The portal's Sales and CSR panes are scoped
+ * to these rows: a lead is "theirs" when `salesperson_id` is them or is empty, a
+ * follow-up via `owner_employee_id` or an unclaimed `owner_role`. Without them
+ * those panes can only ever render their empty state.
+ *
+ * Peter Ssali is the fixture sales rep (`00000000-…-014`); the CSR row mirrors
+ * migration 021's feedback_outreach intent against completed job `j5`.
+ * Idempotent — safe to re-run.
+ */
+export async function seedCrmData(client: ClientBase) {
+  const PETER = '00000000-0000-4000-8000-000000000014';
+
+  await client.query(
+    `INSERT INTO leads (id, name, contact, company, phone, email, salesperson_id, stage, value, source, next_follow_up_at, notes)
+     VALUES
+       ('lead-gf-1', 'Namutebi & Co.', 'Alice Namutebi', 'Namutebi & Co.', '+256 700 111 001', 'alice@namutebi.co', $1, 'Negotiation', 4800000, 'referral', now() + INTERVAL '1 day', 'Office cleaning contract — awaiting signed quote.'),
+       ('lead-gf-2', 'Brian Mugisha', 'Brian Mugisha', '', '+256 700 222 002', 'brian@example.com', $1, 'Quoted', 1200000, 'website', now() + INTERVAL '2 days', 'Home plumbing installation — quote sent.'),
+       ('lead-gf-3', 'Lakeview Apartments', 'Grace Lakeview', 'Lakeview Apartments', '+256 700 333 003', 'office@lakeview.co', $1, 'Contacted', 8600000, 'walk_in', now() + INTERVAL '3 days', 'Property maintenance contract — site visit booked.'),
+       ('lead-gf-4', 'Florence Auma', 'Florence Auma', '', '+256 700 444 004', 'florence@example.com', NULL, 'Lead', 680000, 'social', now() + INTERVAL '4 days', 'Deep cleaning enquiry — unassigned, sales to pick up.'),
+       ('lead-gf-5', 'Mirembe Properties', 'Patrick Mirembe', 'Mirembe Properties', '+256 700 555 005', 'admin@mirembe.co', $1, 'Won', 3200000, 'referral', NULL, 'Signed — converted to a recurring contract.')
+     ON CONFLICT (id) DO NOTHING`,
+    [PETER],
+  );
+
+  await client.query(
+    `INSERT INTO follow_ups (id, type, owner_employee_id, owner_role, lead_id, job_id, notes, due_at, status, follow_up_after_days)
+     VALUES
+       ('11111111-1111-4111-8111-000000000001', 'client_follow_up', $1, 'sales', 'lead-gf-1', NULL, 'Call back on the Namutebi & Co. quotation.', now() + INTERVAL '1 day', 'pending', 3),
+       ('11111111-1111-4111-8111-000000000002', 'client_follow_up', $1, 'sales', 'lead-gf-2', NULL, 'Check the Lakeview site-visit feedback.', now() + INTERVAL '2 days', 'pending', 3),
+       ('11111111-1111-4111-8111-000000000003', 'client_follow_up', NULL, 'sales', 'lead-gf-4', NULL, 'Unassigned: first contact for the Florence Auma enquiry.', now() + INTERVAL '4 days', 'pending', 3),
+       ('11111111-1111-4111-8111-000000000004', 'feedback_outreach', NULL, 'csr', NULL, 'j5', 'Feedback check-in for JOB-00138.', now() + INTERVAL '1 day', 'pending', 2)
+     ON CONFLICT (id) DO NOTHING`,
+    [PETER],
   );
 }
 
@@ -293,4 +379,110 @@ export async function seedStoreData(client: ClientBase) {
       ('u6', '2026-09-22', 'Fuel',        'Total Kamwokya · 30219',      '31 L',               172000, 'direct',     'Diana Achieng', 'Rejected')
      ON CONFLICT (id) DO NOTHING`
   );
+}
+/**
+ * Portal demo dataset (plan v5 Phase B client cut-over). Replaces the hard-coded
+ * fixtures once in `gabfix-inhouse-erp/src/lib/portal-data.ts` (`jobs[]` and
+ * `demoCostLines()`). Lives in the ledger so GET /api/data and
+ * GET /api/employees/my-filings serve it to a signed-in technician, and the
+ * dashboard renders it live rather than from a client array.
+ *
+ * Called from bootstrap-db.ts AFTER ensureStaff/ensureOwner, so the demo
+ * employees (John/Grace/Peter/Gabriel) exist to own the filings. Idempotent
+ * (ON CONFLICT / WHERE NOT EXISTS) and unconditional — a non-empty database still
+ * picks the rows up on the next bootstrap, so re-seeding never dups rows.
+ */
+export async function seedPortalDemo(client: ClientBase): Promise<void> {
+  const now = new Date();
+  // Africa/Kampala is UTC+3 year-round (no DST). Anchor demo timestamps to the
+  // current EAT day so filed costs/timesheets bucket into "this week" on the
+  // portal's week strip instead of landing in a stale prior week.
+  const eat = new Date(now.getTime() + 3 * 3600_000);
+  const [y, mo, day] = [eat.getUTCFullYear(), eat.getUTCMonth(), eat.getUTCDate()];
+  const dateStr = (dayOffset: number) =>
+    new Date(Date.UTC(y, mo, day + dayOffset)).toISOString().slice(0, 10);
+  // `h`/`min` are EAT wall-clock; subtract the +3 offset to get the UTC instant.
+  const ts = (dayOffset: number, h: number, min: number) =>
+    new Date(Date.UTC(y, mo, day + dayOffset, h - 3, min)).toISOString();
+
+  const today = dateStr(0);
+  const yesterday = dateStr(-1);
+  const JOHN = '00000000-0000-4000-8000-000000000013';
+  const GRACE = '00000000-0000-4000-8000-000000000010';
+  const PETER = '00000000-0000-4000-8000-000000000014';
+  const OWNER = '00000000-0000-4000-8000-000000000001';
+
+  // ── Demo customers (namespaced ids — never collide with the JOB-00xxx seed set) ─
+  await client.query(
+    `INSERT INTO customers (id, name, company, type, phone, email, balance, status) VALUES
+       ('cust-gf-sarah', 'Sarah Nanyonga',      'Sarah Nanyonga',      'Residential', '+256 772 200 401', 'sarah@gabfix.ug',        485000, 'Active'),
+       ('cust-gf-mark',  'Mark Kato',           'Mark Kato',           'Residential', '+256 772 200 402', 'mark@gabfix.ug',         120000, 'Active'),
+       ('cust-gf-acacia','Acacia Residences',   'Acacia Residences',   'Commercial',  '+256 772 200 403', 'ops@acaciaresidences.ug', 640000, 'Active'),
+       ('cust-gf-nile',  'Nile Avenue Offices', 'Nile Avenue Offices', 'Commercial',  '+256 772 200 404', 'admin@nileavenue.ug',    950000, 'Active')
+     ON CONFLICT (id) DO NOTHING`,
+  );
+
+  await client.query(
+    `INSERT INTO services (id, name, division, method, price) VALUES
+       ('svc-plumbing',   'Plumbing',   'Field', 'Fixed price', 0),
+       ('svc-inspection', 'Inspection', 'Field', 'Fixed price', 0),
+       ('svc-electrical', 'Electrical', 'Field', 'Fixed price', 0),
+       ('svc-drainage',   'Drainage',   'Field', 'Fixed price', 0)
+     ON CONFLICT (id) DO NOTHING`,
+  );
+    // __PORTAL_SEED_CONTINUE__
+  // ── Demo jobs (GF-XXXX). Dashboard claims these via live PATCH /api/jobs/:id/status.
+  // jobs.cost is seeded as the sum of the lines below (the costing service only
+  // recomputes cost on writes, so the seed must set the right starting value).
+  await client.query(`
+    INSERT INTO jobs (id, number, customer_id, service_id, date, status, revenue, cost, assignees, equipment_usage, scheduled_date, started_at, completed_at, priority, site_address, salesperson_id, manager_id) VALUES
+      ('GF-2841','GF-2841','cust-gf-sarah',  'svc-plumbing',   '${today}',      'In Progress', 285000, 98000,  ARRAY['John Kato']::TEXT[],                '[]'::jsonb, '${today}',      '${ts(0, 9, 0)}', NULL,            'High',   'Muyenga, Kampala',     '${PETER}', '${GRACE}'),
+      ('GF-2846','GF-2846','cust-gf-mark',   'svc-inspection', '${today}',      'Scheduled',   120000, 37000,  ARRAY['John Kato']::TEXT[],                '[]'::jsonb, '${today}',      NULL,           NULL,            'Normal', 'Ntinda, Kampala',      '${PETER}', NULL),
+      ('GF-2852','GF-2852','cust-gf-acacia', 'svc-electrical', '${today}',      'Scheduled',   640000, 237500, ARRAY['John Kato']::TEXT[],                '[]'::jsonb, '${today}',      NULL,           NULL,            'Normal', 'Kololo, Kampala',      '${PETER}', NULL),
+      ('GF-2833','GF-2833','cust-gf-nile',   'svc-drainage',   '${yesterday}',  'Completed',   950000, 320000, ARRAY['John Kato','Grace Atim']::TEXT[], '[]'::jsonb, '${yesterday}', '${ts(-1, 10, 30)}', '${ts(-1, 16, 0)}', 'High',   'Central Kampala',      '${PETER}', '${GRACE}')
+    ON CONFLICT (id) DO NOTHING`);
+
+  // Crew assignments; accepted_at back-populated so "My jobs" shows them claimed.
+  await client.query(`
+    INSERT INTO job_assignments (job_id, employee_id, role, assigned_at, accepted_at) VALUES
+      ('GF-2841','${JOHN}','technician','${ts(0, 8, 0)}','${ts(0, 8, 0)}'),
+      ('GF-2846','${JOHN}','technician','${ts(0, 8, 0)}','${ts(0, 8, 0)}'),
+      ('GF-2852','${JOHN}','technician','${ts(0, 8, 0)}','${ts(0, 8, 0)}'),
+      ('GF-2833','${JOHN}','technician','${ts(-1, 9, 0)}','${ts(-1, 9, 0)}'),
+      ('GF-2833','${GRACE}','lead','${ts(-1, 9, 0)}','${ts(-1, 9, 0)}')
+    ON CONFLICT (job_id, employee_id) DO NOTHING`);
+
+  // Demo field timecards — the approved row carries an approver; the open one doesn't.
+  await client.query(
+    `INSERT INTO timesheets (employee_id, job_id, started_at, ended_at, minutes, rate, approved_by)
+     SELECT $1, $2, $3, $4, $5, $6, $7
+     WHERE NOT EXISTS (SELECT 1 FROM timesheets WHERE job_id = $2 AND employee_id = $1 AND started_at = $3)`,
+    [JOHN, 'GF-2841', ts(0, 9, 0), ts(0, 12, 30), 210, 0, null],
+  );
+  await client.query(
+    `INSERT INTO timesheets (employee_id, job_id, started_at, ended_at, minutes, rate, approved_by)
+     SELECT $1, $2, $3, $4, $5, $6, $7
+     WHERE NOT EXISTS (SELECT 1 FROM timesheets WHERE job_id = $2 AND employee_id = $1 AND started_at = $3)`,
+    [JOHN, 'GF-2852', ts(-1, 15, 0), ts(-1, 18, 0), 180, 0, OWNER],
+  );
+
+  // ── Demo cost lines (former demoCostLines()). An explicit amount wins over
+  //    qty × unit cost — both are stored so the client preview and server total agree.
+  const costLines = [
+    { jobId: 'GF-2841', cat: 'cat-materials',   desc: 'Copper pipes + elbows (15mm)',         qty: 6, unit: 12500,  amount: 75000,  when: 0,  h: 9,  m: 20 },
+    { jobId: 'GF-2852', cat: 'cat-materials',   desc: 'Heater element (3kW) + thermostat',    qty: 1, unit: 87500,  amount: 87500,  when: 0,  h: 11, m: 5 },
+    { jobId: 'GF-2846', cat: 'cat-materials',   desc: 'PVC solvent cement + primer',          qty: 2, unit: 18500,  amount: 37000,  when: 0,  h: 14, m: 40 },
+    { jobId: 'GF-2841', cat: 'cat-transport',   desc: 'Boda fare — parts run to Nakasero',     qty: null, unit: null, amount: 9000,  when: 0,  h: 16, m: 15 },
+    { jobId: 'GF-2833', cat: 'cat-transport',   desc: 'Grab hire — drainage spoil removal',   qty: null, unit: null, amount: 320000, when: -1, h: 10, m: 30 },
+    { jobId: 'GF-2852', cat: 'cat-subcontract', desc: 'Subcontract — electrician, half day',  qty: null, unit: null, amount: 150000, when: -5, h: 13, m: 10 },
+    { jobId: 'GF-2841', cat: 'cat-materials',   desc: 'Thread seal tape + fittings sundries', qty: 4, unit: 3500,  amount: 14000,  when: -6, h: 8,  m: 45 },
+  ];
+  for (const c of costLines) {
+    await client.query(
+      `INSERT INTO job_costs (job_id, category_id, description, qty, unit_cost, amount, supplier_id, source, created_by, created_at)
+       SELECT $1, $2, $3, $4, $5, $6, NULL, 'manual', $7, $8
+       WHERE NOT EXISTS (SELECT 1 FROM job_costs WHERE job_id = $1 AND description = $3 AND amount = $6)`,
+      [c.jobId, c.cat, c.desc, c.qty ?? 1, c.unit ?? 0, c.amount, JOHN, ts(c.when, c.h, c.m)],
+    );
+  }
 }

@@ -7,7 +7,30 @@ import { compactCurrency, currency, type UtilityEntry } from "@/lib/store-data";
 import { useDocumentTitle } from "@/lib/use-document-title";
 import { useState } from "react";
 import { storeMutations, useWorkspace, type NewUtilityCapture } from "@/lib/workspace";
+import { storeApi } from "@/lib/api";
 import { UtilityModal } from "@/components/store/StoreModals";
+
+/**
+ * Download the printable slip PDF for one capture (plan v5 E5). Mirrors the
+ * admin pdf helpers but vendored: the store api client already carries the
+ * auth token and app id headers.
+ */
+async function downloadSlip(id: string): Promise<void> {
+  const res = await fetch(`${storeApi.baseUrl}/documents/utility-slip/${id}.pdf`, {
+    headers: {
+      Authorization: `Bearer ${localStorage.getItem("gabfix-store:auth-token") ?? ""}`,
+      "X-App-Id": "store",
+    },
+  });
+  if (!res.ok) throw new Error(`Slip download failed (${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `UTC-${id}.pdf`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 const columns: Column<UtilityEntry>[] = [
   {
@@ -79,6 +102,7 @@ function UtilitiesPage() {
     .reduce((s, u) => s + u.amount, 0);
   const quarantined = utilityEntries.filter((u) => u.status === "Quarantined").length;
   const [capOpen, setCapOpen] = useState(false);
+  const [slipBusy, setSlipBusy] = useState("");
 
   return (
     <>
@@ -127,6 +151,44 @@ function UtilitiesPage() {
         searchPlaceholder="Search type, meter, category or staff..."
         actions={<StoreButton variant="ghost">Filters</StoreButton>}
       />
+
+      <section className="rounded-xl border border-border bg-card">
+        <div className="border-b border-border px-5 py-4">
+          <h2 className="font-semibold">Slip PDFs</h2>
+          <p className="text-xs text-muted-foreground">Printable record per capture — quarantine note or ledger reference.</p>
+        </div>
+        <div className="divide-y divide-border">
+          {utilityEntries.slice(0, 8).map((u) => (
+            <div key={u.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+              <div>
+                <p className="text-sm font-medium">{u.type} · {u.reference}</p>
+                <p className="text-xs text-muted-foreground">{u.date} · {currency(u.amount)} · {u.status}</p>
+              </div>
+              <StoreButton
+                variant="outline"
+                disabled={slipBusy === u.id}
+                onClick={async () => {
+                  setSlipBusy(u.id);
+                  try {
+                    await downloadSlip(u.id);
+                  } catch {
+                    window.alert("Could not download the slip PDF.");
+                  } finally {
+                    setSlipBusy("");
+                  }
+                }}
+              >
+                {slipBusy === u.id ? "Preparing…" : "Slip PDF"}
+              </StoreButton>
+            </div>
+          ))}
+          {utilityEntries.length === 0 && (
+            <p className="px-5 py-8 text-center text-sm text-muted-foreground">
+              No captures yet — "Capture slip" records the first meter reading.
+            </p>
+          )}
+        </div>
+      </section>
 
       <UtilityModal
         open={capOpen}

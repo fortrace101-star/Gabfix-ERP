@@ -67,11 +67,13 @@ export function MovementModal({
   onClose,
   onSubmit,
   items,
+  defaultType = "Received",
 }: {
   open: boolean;
   onClose: () => void;
   onSubmit: (input: { itemId: string; type: "Received" | "Issued" | "Adjustment" | "Return"; qty: number; reference: string }) => Promise<void>;
   items: Array<{ id: string; name: string; code: string }>;
+  defaultType?: "Received" | "Issued" | "Adjustment" | "Return";
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -115,7 +117,7 @@ export function MovementModal({
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Type">
-            <select name="type" className={inputClass} defaultValue="Received">
+                        <select name="type" className={inputClass} defaultValue={defaultType}>
               <option>Received</option>
               <option>Issued</option>
               <option>Adjustment</option>

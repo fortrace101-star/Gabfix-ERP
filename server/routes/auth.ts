@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import { z } from 'zod';
 import { pool } from '../db';
 import { requireAuth, signTokens, verifyToken, type AuthUser } from '../middleware/auth';
 
@@ -89,4 +90,119 @@ authRouter.get('/me', requireAuth, async (req, res) => {
 /** POST /api/auth/logout — stateless tokens; the client discards its pair. */
 authRouter.post('/logout', (_req, res) => {
   res.json({ ok: true });
+});
+
+const signUpSchema = z.object({
+  inviteCode: z.string().min(1),
+  name: z.string().trim().min(2).max(80),
+  email: z.string().trim().max(120).default(''),
+  phone: z.string().trim().max(30).default(''),
+  password: z.string().min(6).max(100),
+});
+
+/**
+ * POST /api/auth/sign-up — invite-code-gated new hire onboarding (public).
+ *
+ * The admin issues a single-use code (see routes/invites.ts) that carries the
+ * role + app_scope to grant. A new hire submits the code with their own details
+ * (name/email/password); the server creates the employee with EXACTLY the
+ * code's grants, then marks the code used, then mints the JWT pair. The body
+ * cannot escalate role or app_scope beyond the code — the code is the ceiling.
+ * Backward compatible: /login (password against an existing pin_hash) is
+ * untouched, so seeded/owner accounts keep working verbatim.
+ */
+authRouter.post('/sign-up', async (req, res) => {
+  const parsed = signUpSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(422).json({ error: 'Invalid sign-up payload', details: parsed.error.flatten() });
+    return;
+  }
+  const { inviteCode, name, email, phone, password } = parsed.data;
+  const code = (inviteCode ?? '').trim().toUpperCase();
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Claim the code (single-use) under a row lock so concurrent sign-ups can't
+    // double-spend the same invitation.
+    const { rows } = await client.query(
+      `SELECT role, app_scope FROM invitations
+         WHERE code = $1
+           AND used_at IS NULL
+           AND revoked_at IS NULL
+           AND expires_at > now()
+       LIMIT 1 FOR UPDATE`,
+      [code],
+    );
+    const invite = rows[0];
+    if (!invite) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Invalid, expired, or already-used code' });
+      return;
+    }
+
+    // The employee is created with EXACTLY the code's grants — the body cannot
+    // escalate role or app_scope beyond what the admin authorised.
+    const pinHash = await bcrypt.hash(password, 10);
+    const { rows: created } = await client.query(
+      `INSERT INTO employees (name, role, phone, email, hourly_rate, app_scope, pin_hash, active, created_by)
+         VALUES ($1, $2, $3, $4, 0, $5, $6, TRUE, $7)
+       RETURNING id, name, role, app_scope AS "appScope"`,
+      [name, invite.role, phone ?? '', email ?? '', invite.app_scope, pinHash, `invite:${code}`],
+    );
+    const employee = created[0];
+
+    await client.query(
+      `UPDATE invitations SET used_by = $1, used_at = now() WHERE code = $2`,
+      [employee.id, code],
+    );
+
+    await client.query('COMMIT');
+
+    const user: AuthUser = {
+      id: employee.id,
+      name: employee.name,
+      role: employee.role,
+      app_scope: employee.appScope ?? [],
+    };
+    res.status(201).json({ ...signTokens(user), user });
+  } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+    fail(res, error, 'Sign-up failed');
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * GET /api/auth/invites/:code/validate — public pre-check for the Sign Up form.
+ * Mounted on authRouter (before the staged guard) so an app can resolve a code
+ * to its grants — role + app_scope + expiry — without presenting a token.
+ */
+authRouter.get('/invites/:code/validate', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT role, app_scope AS "appScope", expires_at AS "expiresAt"
+       FROM invitations
+       WHERE code = $1
+         AND used_at IS NULL
+         AND revoked_at IS NULL
+         AND expires_at > now()
+       LIMIT 1`,
+      [(req.params.code ?? '').trim().toUpperCase()],
+    );
+    if (!rows.length) {
+      res.status(404).json({ error: 'Invalid, expired, or already-used code' });
+      return;
+    }
+    res.json({
+      valid: true,
+      role: rows[0].role,
+      app_scope: rows[0].appScope,
+      expires_at: rows[0].expiresAt,
+    });
+  } catch (error) {
+    fail(res, error, 'Could not validate invite');
+  }
 });

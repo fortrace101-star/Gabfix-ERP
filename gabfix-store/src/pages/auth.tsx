@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+
 import { Eye, EyeOff, LoaderCircle, LockKeyhole, UserRound } from "lucide-react";
 import { storeApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -20,8 +21,7 @@ export default function AuthPage() {
   // Return the staff member to the page they originally requested (set by
   // ProtectedRoute), accepting only internal paths to prevent open redirects.
   const from = (location.state as { from?: string } | null)?.from;
-  const redirectTarget =
-    from && from.startsWith("/") && !from.startsWith("//") ? from : "/";
+  const redirectTarget = from && from.startsWith("/") && !from.startsWith("//") ? from : "/";
 
   useEffect(() => {
     if (storeApi.auth.isAuthenticated()) {
@@ -67,8 +67,8 @@ export default function AuthPage() {
             Every tool handed over.
           </h1>
           <p className="mt-5 max-w-lg text-base leading-7 text-muted-foreground">
-            Keep contract materials, tool check-outs, purchase requests, and utility captures
-            moving in one workspace.
+            Keep contract materials, tool check-outs, purchase requests, and utility captures moving
+            in one workspace.
           </p>
         </div>
         <p className="text-xs text-muted-foreground">Gabfix Home Solutions · Kampala</p>
@@ -129,6 +129,13 @@ export default function AuthPage() {
               Sign in
             </Button>
           </form>
+
+          <p className="mt-6 text-center text-sm text-muted-foreground">
+            New to Gabfix Store?{" "}
+            <Link to="/auth/sign-up" className="font-medium text-primary hover:underline">
+              Sign up with an Admin code
+            </Link>
+          </p>
         </div>
       </section>
     </main>

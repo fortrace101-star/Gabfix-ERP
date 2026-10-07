@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { pool } from '../db';
 import { fail } from '../lib/http';
 import { parseBody } from '../validation/common';
+import { placeholderId } from '../lib/tables';
+import { dispatchEvent } from '../services/notifications';
 import { publish } from '../services/realtime';
 
 /**
@@ -77,11 +79,12 @@ storeRouter.post('/movements', async (req: Request, res: Response) => {
   try {
     await client.query('BEGIN');
     const delta = input.type === 'Issued' ? -Math.abs(input.qty) : Math.abs(input.qty);
+    const movementId = placeholderId('inventory_movements');
     const { rows } = await client.query(
-      `INSERT INTO inventory_movements (item_id, type, qty, reference, moved_on, by_name)
-       VALUES ($1, $2, $3, $4, COALESCE($5::date, CURRENT_DATE), $6)
+      `INSERT INTO inventory_movements (id, item_id, type, qty, reference, moved_on, by_name)
+       VALUES ($1, $2, $3, $4, COALESCE($5::date, CURRENT_DATE), $6, $7)
        RETURNING id, item_id AS "itemId", type, qty, reference, moved_on::text AS "movedOn", by_name AS "byName"`,
-      [input.itemId, input.type, delta, input.reference, input.movedOn ?? null, input.byName],
+      [movementId, input.itemId, input.type, delta, input.reference, input.movedOn ?? null, input.byName],
     );
     const updated = await client.query(
       `UPDATE inventory_items SET quantity = quantity + $2 WHERE id = $1
@@ -152,12 +155,15 @@ storeRouter.patch('/tools/:id', async (req: Request, res: Response) => {
 storeRouter.post('/purchase-requests', async (req: Request, res: Response) => {
   try {
     const input = parseBody(purchaseRequestCreate, req.body);
+    // purchase_requests.id has no default — generate the same shape as the
+    // seeded rows (e.g. "pr1") so a fresh insert satisfies the PK.
+    const requestId = `pr${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const { rows } = await pool.query(
-      `INSERT INTO purchase_requests (item_id, description, qty, supplier_id, value, requested_by, requested_on, status)
-       VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE, 'Pending approval')
+      `INSERT INTO purchase_requests (id, item_id, description, qty, supplier_id, value, requested_by, requested_on, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE, 'Pending approval')
        RETURNING id, item_id AS "itemId", description, qty, supplier_id AS "supplierId",
                  value, requested_by AS "requestedBy", requested_on::text AS "requestedOn", status`,
-      [input.itemId, input.description, input.qty, input.supplierId ?? null, input.value, req.user?.name ?? ''],
+      [requestId, input.itemId, input.description, input.qty, input.supplierId ?? null, input.value, req.user?.name ?? ''],
     );
     res.status(201).json(rows[0]);
     publish({ type: 'purchase-created', by: req.user?.name });
@@ -170,8 +176,12 @@ storeRouter.post('/purchase-requests', async (req: Request, res: Response) => {
 storeRouter.patch('/purchase-requests/:id', async (req: Request, res: Response) => {
   try {
     const input = parseBody(purchaseRequestPatch, req.body);
+    // `decided_by` is NOT NULL DEFAULT '' (migration 016). An absent/empty
+    // decidedBy must collapse to '' rather than NULL, otherwise Postgres
+    // rejects the row (SQLSTATE 23502 — "Approve modal does nothing" bug).
+    // COALESCE(NULLIF(x,''),'') yields '' for NULL/empty, the real name otherwise.
     const { rows } = await pool.query(
-      `UPDATE purchase_requests SET status = $2, decided_by = NULLIF($3, ''), decided_on = CURRENT_DATE
+      `UPDATE purchase_requests SET status = $2, decided_by = COALESCE(NULLIF($3, '') , ''), decided_on = CURRENT_DATE
        WHERE id = $1
        RETURNING id, status, decided_by AS "decidedBy", decided_on::text AS "decidedOn"`,
       [req.params.id, input.status, input.decidedBy],
@@ -182,6 +192,18 @@ storeRouter.patch('/purchase-requests/:id', async (req: Request, res: Response) 
     }
     res.json(rows[0]);
     publish({ type: 'purchase-approved', by: req.user?.name, payload: rows[0] });
+    // Only an approval rings the store's bell — rejections stay silent.
+    // The response is already sent: a bell failure must never touch res.
+    if (input.status === 'Approved') {
+      const client = await pool.connect();
+      try {
+        await dispatchEvent(client, { type: 'purchase.approved', entityType: 'purchase_requests', entityId: String(rows[0].id) });
+      } catch (bellError) {
+        console.error('purchase.approved bell failed:', bellError);
+      } finally {
+        client.release();
+      }
+    }
   } catch (error) {
     fail(res, error, 'Purchase decision failed');
   }

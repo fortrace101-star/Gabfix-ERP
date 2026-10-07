@@ -1,14 +1,41 @@
 import 'dotenv/config';
 import { Pool } from 'pg';
 
+// When PGHOST is "localhost" the OS resolver can hand back ::1 (IPv6) or
+// 127.0.0.1 (IPv4) and pg's native client has been observed to stall on the
+// wrong family on Windows, producing "timeout exceeded when trying to connect".
+// Pin to 127.0.0.1 (Postgres listens on *, so this always works) unless the
+// env explicitly sets something else.
+const host = process.env.PGHOST === 'localhost' ? '127.0.0.1' : (process.env.PGHOST || 'localhost');
+
 export const pool = new Pool({
-  host: process.env.PGHOST || 'localhost',
+  host,
   port: Number(process.env.PGPORT) || 5432,
   user: process.env.PGUSER || 'postgres',
   password: process.env.PGPASSWORD || '',
   database: process.env.PGDATABASE || 'gabfix',
   // Ensure unqualified table names always resolve to the public schema.
   options: '-c search_path=public',
+  // Self-heal the pool: when PostgreSQL briefly drops/restarts, dead
+  // (half-open) client sockets used to strand pool.query() forever because
+  // pg defaults to no connection/idle timeout. Recycle idle sockets and cap
+  // connect attempts so a blip recovers instead of hanging the API.
+  max: 10,
+    idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+  // Reject a client that's been waiting too long instead of hanging forever.
+  allowExitOnIdle: true,
+});
+
+// Best practice (pg docs): when PostgreSQL closes an idle client socket
+// mid-session, the client surfaces an 'error' event. Releasing it with
+// `true` (discard) makes the pool drop the half-open socket and hand out a
+// fresh connection on the next query. This is the missing piece that strands
+// queries and triggers the 500/hang symptom once idleTimeoutMillis recycles
+// idle sockets — without it, a dead socket can be checked out and used.
+pool.on('error', (err: unknown, client) => {
+  console.error('[db] evicting dead idle client:', err instanceof Error ? err.message : String(err));
+  client.release(true);
 });
 
 export type AppData = {
@@ -29,14 +56,31 @@ export type AppData = {
   purchaseRequests: unknown[];
   toolCheckouts: unknown[];
   utilityCaptures: unknown[];
+  /** Role-dashboard slices (021): acquisition pipeline, reminder queue, log. */
+  leads: unknown[];
+  followUps: unknown[];
+  interactions: unknown[];
+  feedback: unknown[];
+  /** Minimal people feed for the supervisor's team-performance view. */
+    people: unknown[];
+  /** Field-ops reads (Phase 1b/1c): crew assignments + lifecycle log for the
+   *  Technician "My jobs" strip, plus own cost/timesheet filings for the
+   *  Technician/Accountant boards. */
+  jobAssignments: unknown[];
+  jobEvents: unknown[];
+  timesheets: unknown[];
+  jobCosts: unknown[];
 };
 
 const num = (value: unknown) => (value === null || value === undefined ? 0 : Number(value));
 
 /** Load the whole workspace from PostgreSQL, shaped exactly like the frontend AppData type. */
 export async function getData(): Promise<AppData> {
-  const [customers, services, jobs, invoices, expenses, laundry, equipment, inventory, payments, costCategories, suppliers, depreciationEntries, laundryItems, inventoryMovements, purchaseRequests, toolCheckouts, utilityCaptures] = await Promise.all([
-    pool.query(`SELECT id, name, company, type, phone, email, balance::float8 AS balance, status FROM customers ORDER BY id`),
+  const [customers, services, jobs, invoices, expenses, laundry, equipment, inventory, payments, costCategories, suppliers, depreciationEntries, laundryItems, inventoryMovements, purchaseRequests, toolCheckouts, utilityCaptures, leads, followUps, interactions, feedback, people, jobAssignments, jobEvents, timesheets, jobCosts] = await Promise.all([
+    pool.query(`SELECT id, name, company, type, phone, email, balance::float8 AS balance, status,
+                       salesperson_id AS "salespersonId", source_lead_id AS "sourceLeadId",
+                       last_contacted_at AS "lastContactedAt"
+                FROM customers ORDER BY id`),
     pool.query(`SELECT id, name, division, method, price::float8 AS price, active FROM services ORDER BY id`),
     pool.query(`SELECT id, number, customer_id AS "customerId", service_id AS "serviceId",
                        date::text AS date, scheduled_date::text AS "scheduledDate",
@@ -44,7 +88,11 @@ export async function getData(): Promise<AppData> {
                        status, priority, revenue::float8 AS revenue, cost::float8 AS cost,
                        assignees, equipment_usage AS "equipmentUsage",
                        salesperson_id AS "salespersonId", manager_id AS "managerId",
-                       site_address AS "siteAddress", lat::float8 AS lat, lng::float8 AS lng
+                       site_address AS "siteAddress", lat::float8 AS lat, lng::float8 AS lng,
+                       source, proposed_by AS "proposedBy",
+                       confirmed_at::text AS "confirmedAt", confirmed_by AS "confirmedBy",
+                       cancel_reason AS "cancelReason", share_token::text AS "shareToken",
+                       share_sent_at::text AS "shareSentAt", closed_at::text AS "closedAt"
                 FROM jobs ORDER BY date DESC, id DESC`),
     pool.query(`SELECT id, number, customer_id AS "customerId", date::text AS date, due::text AS due,
                        total::float8 AS total, paid::float8 AS paid, status
@@ -106,6 +154,57 @@ export async function getData(): Promise<AppData> {
                        amount::float8 AS amount, category_kind AS "categoryKind",
                        captured_by AS "capturedBy", status, expense_id AS "expenseId"
                 FROM utility_captures ORDER BY captured_on DESC, id DESC`),
+    pool.query(`SELECT id, name, contact, company, phone, email,
+                       salesperson_id AS "salespersonId", stage,
+                       value::float8 AS value, source,
+                       next_follow_up_at AS "nextFollowUpAt",
+                       converted_customer_id AS "convertedCustomerId",
+                       notes, created_at::text AS "createdAt"
+                FROM leads WHERE deleted_at IS NULL ORDER BY created_at DESC, id DESC`),
+    pool.query(`SELECT id, type, owner_employee_id AS "ownerEmployeeId", owner_role AS "ownerRole",
+                       customer_id AS "customerId", lead_id AS "leadId", job_id AS "jobId",
+                       notes, due_at AS "dueAt", status,
+                       follow_up_after_days AS "followUpAfterDays",
+                       completed_at AS "completedAt", created_at::text AS "createdAt"
+                FROM follow_ups ORDER BY due_at ASC`),
+    pool.query(`SELECT id, customer_id AS "customerId", lead_id AS "leadId", job_id AS "jobId",
+                       employee_id AS "employeeId", channel, notes, outcome,
+                       next_follow_up_at AS "nextFollowUpAt", created_at::text AS "createdAt"
+                FROM interactions ORDER BY created_at DESC LIMIT 250`),
+    pool.query(`SELECT id, job_id AS "jobId", customer_id AS "customerId", rating, comment,
+                       submitted_at AS "submittedAt"
+                FROM feedback ORDER BY submitted_at DESC LIMIT 250`),
+    pool.query(`SELECT id, name, role FROM employees
+                WHERE deleted_at IS NULL AND active = TRUE
+                ORDER BY role, name`),
+    pool.query(`SELECT a.job_id AS "jobId", a.employee_id AS "employeeId", e.name AS "employeeName",
+                       a.role, a.assigned_at::text AS "assignedAt", a.accepted_at::text AS "acceptedAt",
+                       a.completed_at::text AS "completedAt", j.number AS "jobNumber",
+                       j.customer_id AS "customerId", j.status, j.scheduled_date::text AS "scheduledDate",
+                       j.revenue::float8 AS revenue
+                FROM job_assignments a
+                JOIN employees e ON e.id = a.employee_id
+                JOIN jobs j ON j.id = a.job_id
+                ORDER BY a.assigned_at DESC, j.number`),
+    pool.query(`SELECT job_id AS "jobId", kind, at::text AS "at",
+                       actor_employee_id AS "actorEmployeeId", payload
+                FROM job_events
+                ORDER BY at DESC`),
+    pool.query(`SELECT t.id, t.employee_id AS "employeeId", t.job_id AS "jobId",
+                       j.number AS "jobNumber", t.started_at::text AS "startedAt",
+                       t.ended_at::text AS "endedAt", t.minutes, t.rate::float8 AS rate,
+                       (t.approved_by IS NOT NULL) AS approved
+                FROM timesheets t
+                LEFT JOIN jobs j ON j.id = t.job_id
+                ORDER BY t.started_at DESC`),
+    pool.query(`SELECT c.id, c.job_id AS "jobId", j.number AS "jobNumber",
+                       cc.name AS "categoryName", c.category_id AS "categoryId",
+                       c.description, c.qty::float8 AS qty, c.unit_cost::float8 AS "unitCost",
+                       c.amount::float8 AS amount, c.source, c.created_at::text AS "createdAt"
+                FROM job_costs c
+                LEFT JOIN jobs j ON j.id = c.job_id
+                LEFT JOIN cost_categories cc ON cc.id = c.category_id
+                ORDER BY c.created_at DESC, c.id DESC`),
   ]);
 
   return {
@@ -126,5 +225,14 @@ export async function getData(): Promise<AppData> {
     purchaseRequests: purchaseRequests.rows,
     toolCheckouts: toolCheckouts.rows,
     utilityCaptures: utilityCaptures.rows,
+    leads: leads.rows,
+    followUps: followUps.rows,
+    interactions: interactions.rows,
+    feedback: feedback.rows,
+        people: people.rows,
+    jobAssignments: jobAssignments.rows,
+    jobEvents: jobEvents.rows,
+    timesheets: timesheets.rows,
+    jobCosts: jobCosts.rows,
   };
 }

@@ -1,14 +1,17 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { pool } from '../db';
-import { unreadNotifications, markNotificationRead, recordFeedback, getFeedbackRequest } from '../services/notifications';
+import { unreadNotifications, markNotificationRead, markAllNotificationsRead, recordFeedback, getFeedbackRequest, type BellScope } from '../services/notifications';
 import { fail } from '../lib/http';
 
 /**
- * Notification routes (Phase 3, plan §13).
+ * Notification routes (Phase 3, plan §13; bells re-scoped in plan v5 F2).
  *
- * - GET  /api/notifications/unread/:customerId  — bell panel data
- * - POST /api/notifications/:id/read            — mark a notification read
+ * - GET  /api/notifications/unread              — bell panel data (scoped:
+ *   ?scope=admin|laundry|portal|store, ?employeeId=, ?customerId=, ?since=)
+ * - GET  /api/notifications/unread/:customerId  — legacy customer-only bell
+ * - POST /api/notifications/:id/read            — mark one notification read
+ * - POST /api/notifications/read-all            — mark the whole bell read
  * - GET  /feedback/:token                        — public feedback form (HTML)
  * - POST /feedback/:token                        — record a star rating
  * - POST /api/webhooks/whatsapp                  — WhatsApp delivery status
@@ -18,12 +21,44 @@ export const notificationsRouter = Router();
 
 // ── Bell panel ─────────────────────────────────────────────────────────────────
 
+const SCOPES: ReadonlySet<string> = new Set(['admin', 'laundry', 'portal', 'store']);
+
+function bellOptions(req: Request): Parameters<typeof unreadNotifications>[1] {
+  const scope = typeof req.query.scope === 'string' && SCOPES.has(req.query.scope) ? (req.query.scope as BellScope) : undefined;
+  const employeeId = typeof req.query.employeeId === 'string' ? req.query.employeeId : undefined;
+  const customerId = typeof req.query.customerId === 'string' ? req.query.customerId : '';
+  const since = typeof req.query.since === 'string' ? req.query.since : undefined;
+  const limit = Number(req.query.limit);
+  return { scope, employeeId, since, limit: Number.isFinite(limit) ? limit : undefined, ...(customerId ? { customerId } : {}) } as Parameters<typeof unreadNotifications>[1];
+}
+
+notificationsRouter.get('/notifications/unread', async (req: Request, res: Response) => {
+  try {
+    const rows = await unreadNotifications('', bellOptions(req));
+    res.json(rows);
+  } catch (error) {
+    fail(res, error, 'Could not load notifications');
+  }
+});
+
 notificationsRouter.get('/notifications/unread/:customerId', async (req: Request, res: Response) => {
   try {
     const rows = await unreadNotifications(String(req.params.customerId));
     res.json(rows);
   } catch (error) {
     fail(res, error, 'Could not load notifications');
+  }
+});
+
+notificationsRouter.post('/notifications/read-all', async (req: Request, res: Response) => {
+  try {
+    const scope = typeof req.body?.scope === 'string' && SCOPES.has(req.body.scope) ? (req.body.scope as BellScope) : undefined;
+    const employeeId = typeof req.body?.employeeId === 'string' ? req.body.employeeId : undefined;
+    const customerId = typeof req.body?.customerId === 'string' ? req.body.customerId : undefined;
+    const updated = await markAllNotificationsRead({ scope, employeeId, customerId });
+    res.json({ updated });
+  } catch (error) {
+    fail(res, error, 'Could not mark notifications read');
   }
 });
 

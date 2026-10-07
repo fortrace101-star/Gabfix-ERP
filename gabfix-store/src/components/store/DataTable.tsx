@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -148,7 +148,6 @@ export function DataTable<T extends { id: string }>({
         <span>
           Showing {visible.length} of {rows.length}
         </span>
-        <span>Demo data · live figures once the store server is connected</span>
       </div>
     </div>
   );

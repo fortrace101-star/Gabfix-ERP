@@ -21,6 +21,18 @@ export type StaffSession = {
   app_scope: string[];
 };
 
+/** An invite code row as surfaced by the Admin Console's Staff & Access panel. */
+export type InviteCode = {
+  code: string;
+  role: string;
+  appScope: string[];
+  expiresAt: string;
+  createdAt: string;
+  usedBy: string | null;
+  usedAt: string | null;
+  revokedAt: string | null;
+};
+
 type TokenPair = { accessToken: string; refreshToken: string; user: StaffSession };
 
 function headersWithAuth(extra?: Record<string, string>): Record<string, string> {
@@ -125,6 +137,28 @@ export const apiClient = {
     isAuthenticated() {
       return Boolean(localStorage.getItem(ACCESS_TOKEN_KEY));
     },
+  },
+
+  /**
+   * Staff & Access invite-code management (admin console).
+   * `POST /api/invites` is owner/manager-guarded at the route; the admin-scope
+   * ceiling (only owner may grant `admin`) is enforced server-side too.
+   */
+  invites: {
+    list: () => apiClient.get<InviteCode[]>("/invites"),
+    create: (body: { role: string; app_scope: string[]; expiresInHours?: number }) =>
+      apiClient.request<InviteCode>("/invites", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    revoke: (code: string) =>
+      apiClient.request<{ ok: boolean }>(`/invites/${encodeURIComponent(code)}/revoke`, {
+        method: "PATCH",
+      }),
+    remove: (code: string) =>
+      apiClient.request<{ ok: boolean }>(`/invites/${encodeURIComponent(code)}`, {
+        method: "DELETE",
+      }),
   },
 };
 

@@ -2,6 +2,8 @@ import { Component, lazy, Suspense, type ErrorInfo, type ReactNode } from "react
 import { BrowserRouter, Link, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/components/store/AppShell";
 import ProtectedRoute from "@/components/store/ProtectedRoute";
+import SignUpPage from "@/pages/sign-up";
+
 import { registerStoreServiceWorker } from "@/lib/pwa";
 
 // Per-route code splitting: each page (and its chart/table dependencies) loads on demand.
@@ -103,6 +105,8 @@ export default function App() {
         <Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/auth" element={<AuthPage />} />
+            <Route path="/auth/sign-up" element={<SignUpPage />} />
+
             <Route
               path="*"
               element={

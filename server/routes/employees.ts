@@ -17,7 +17,7 @@ export const employeesRouter = Router();
 export const SCOPE_DOMAIN = ['admin', 'laundry', 'portal', 'store'] as const;
 const APP_SCOPES = SCOPE_DOMAIN;
 const ROLES = [
-  'owner', 'manager', 'sales', 'technician', 'laundry', 'accountant', 'storekeeper',
+  'owner', 'manager', 'sales', 'technician', 'laundry', 'accountant', 'storekeeper', 'csr',
 ] as const;
 
 const SCOPE_SUBSET = z

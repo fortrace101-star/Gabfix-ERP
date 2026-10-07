@@ -19,21 +19,28 @@
 
 import type { PoolClient } from 'pg';
 import { pool } from '../db';
+import webpush from 'web-push';
 import { publish } from './realtime';
 import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
 import { randomBytes } from 'node:crypto';
 import { kampalaToday } from '../lib/dates';
-
-export type Channel = 'whatsapp' | 'sms' | 'email' | 'inapp';
+export type Channel = 'whatsapp' | 'sms' | 'email' | 'inapp' | 'push';
 export type NotificationStatus = 'queued' | 'sent' | 'delivered' | 'read' | 'failed' | 'skipped';
 
 export type DomainEvent =
   | { type: 'job.completed'; entityType: 'jobs'; entityId: string }
   | { type: 'job.created'; entityType: 'jobs'; entityId: string }
+  | { type: 'job.assigned'; entityType: 'jobs'; entityId: string }
   | { type: 'payment.recorded'; entityType: 'payments'; entityId: string }
   | { type: 'laundry.ready'; entityType: 'laundry_orders'; entityId: string }
-  | { type: 'laundry.collected'; entityType: 'laundry_orders'; entityId: string };
+  | { type: 'laundry.collected'; entityType: 'laundry_orders'; entityId: string }
+  | { type: 'purchase.approved'; entityType: 'purchase_requests'; entityId: string }
+  | { type: 'feedback.received'; entityType: 'feedback'; entityId: string }
+  // Order lifecycle (plan P1): proposal created / shared / phone-verified.
+  | { type: 'order.proposed'; entityType: 'jobs'; entityId: string }
+  | { type: 'order.proposed.shared'; entityType: 'jobs'; entityId: string }
+  | { type: 'order.confirmed'; entityType: 'jobs'; entityId: string };
 
 export type NotificationRow = {
   id: string;
@@ -54,6 +61,8 @@ type Audience = {
   customer_id: string | null;
   employee_id: string | null;
   to_address: string;
+  /** Pin the channels this recipient accepts (e.g. a synthetic app bell is inapp-only). */
+  channels?: Channel[];
 };
 
 type TemplateRow = {
@@ -71,6 +80,9 @@ export type Settings = {
   whatsapp_enabled: boolean;
   sms_enabled: boolean;
   email_enabled: boolean;
+  /** Opt-in per app: column 'push_enabled' survives resets; default off until
+   *  the admin settings UI flips it. */
+  push_enabled: boolean;
   appreciation_delay_hours: number;
   feedback_retention_days: number;
 };
@@ -110,7 +122,7 @@ export async function loadSettings(client: PoolClient): Promise<Settings> {
   if (!rows.length) {
     const defaults: Settings = {
       company_name: 'Gabfix', company_phone: '', whatsapp_enabled: false, sms_enabled: false,
-      email_enabled: false, appreciation_delay_hours: 24, feedback_retention_days: 90,
+      email_enabled: false, push_enabled: false, appreciation_delay_hours: 24, feedback_retention_days: 90,
     };
     settingsCache = { data: defaults, at: now };
     return defaults;
@@ -131,6 +143,7 @@ function channelEnabled(settings: Settings, channel: Channel): boolean {
     case 'sms': return settings.sms_enabled && !!process.env.AT_API_KEY;
     case 'email': return settings.email_enabled && !!process.env.SMTP_HOST;
     case 'inapp': return true;
+    default: return false;
   }
 }
 
@@ -148,6 +161,9 @@ export function pickChannels(settings: Settings, hasWhatsApp: boolean, hasSms: b
     if (settings.sms_enabled && hasSms) channels.push('sms');
     if (settings.email_enabled && hasEmail) channels.push('email');
   }
+  // Push is opt-in per app via the server settings toggle; when enabled it
+  // rides alongside the in-app bell (plan §F2: all four apps delivered).
+  if (settings.push_enabled) channels.push('push');
   channels.push('inapp');
   return channels;
 }
@@ -257,7 +273,7 @@ type EventRule = {
   templateKey: string;
   channel: Channel;
   /** Resolve recipients for this event inside the caller's transaction. */
-  audience: (client: PoolClient, event: DomainEvent) => Promise<Audience[]>;
+  audience: Audience[] | ((client: PoolClient, event: DomainEvent) => Promise<Audience[]>);
   /** Build the per-recipient payload (template variables). */
   payload: (client: PoolClient, event: DomainEvent) => Promise<Record<string, unknown>>;
   /** Optional: schedule the notification for the future (e.g. appreciation). */
@@ -299,6 +315,10 @@ async function appreciationAudience(client: PoolClient, event: DomainEvent): Pro
  * Rules mapping a domain event to (template, channel, audience, payload).
  * Each rule produces notification rows for the resolved channels.
  */
+/** Synthetic audiences: rows addressed to a whole app (F2 scoped bells). */
+const STORE_BELL: Audience[] = [{ customer_id: null, employee_id: null, to_address: 'app:store' }];
+const ADMIN_BELL: Audience[] = [{ customer_id: null, employee_id: null, to_address: 'app:admin' }];
+
 export const EVENT_RULES: Record<DomainEvent['type'], EventRule[]> = {
   'job.completed': [
     {
@@ -312,24 +332,306 @@ export const EVENT_RULES: Record<DomainEvent['type'], EventRule[]> = {
         return completionPayload(data, `${process.env.APP_BASE_URL || ''}/feedback/${token}`);
       },
     },
-  {
-    templateKey: 'job_appreciation',
-    channel: 'inapp',
-    audience: appreciationAudience,
-    payload: async (client, event) => {
-      const data = await loadCompletionData(client, event.entityId);
-      if (!data) return {};
-      return { customer_name: data.customerName };
+    {
+      templateKey: 'job_appreciation',
+      channel: 'inapp',
+      audience: appreciationAudience,
+      payload: async (client, event) => {
+        const data = await loadCompletionData(client, event.entityId);
+        if (!data) return {};
+        return { customer_name: data.customerName };
+      },
+      scheduledFor: (settings) => new Date(Date.now() + settings.appreciation_delay_hours * 3600 * 1000),
     },
-    scheduledFor: (settings) => new Date(Date.now() + settings.appreciation_delay_hours * 3600 * 1000),
-  },
+    {
+      templateKey: 'job_completion',
+      channel: 'push',
+      audience: STORE_BELL,
+      payload: async (client, event) => {
+        const data = await loadCompletionData(client, event.entityId);
+        if (!data) return {};
+        const token = await createFeedbackRequest(client, 'job', event.entityId, 'push', 90);
+        return completionPayload(data, `${process.env.APP_BASE_URL || ''}/feedback/${token}`);
+      },
+    },
   ],
   'job.created': [],
   'payment.recorded': [],
-  'laundry.ready': [],
+  'laundry.ready': [
+    {
+      templateKey: 'laundry_ready',
+      channel: 'inapp',
+      audience: laundryReadyAudience,
+      payload: laundryReadyPayload,
+    },
+    {
+      templateKey: 'laundry_ready',
+      channel: 'push',
+      audience: ADMIN_BELL,
+      payload: laundryReadyPayload,
+    },
+  ],
   'laundry.collected': [],
+  // Plan v5 F: cross-app push via the same fabric. These rules use the
+  // synthetic app bells + the push channel (plan §F1/F2: all four apps
+  // delivered, bell-only surface). Dispatch is unchanged — the same rows
+  // are produced; only the channel set differs per recipient.
+  'job.assigned': [
+    // The assignee's own bell (plan F3: job.assigned → portal bell): one
+    // employee-scoped row per crew member so GET /notifications/unread?
+    // scope=portal&employeeId= surfaces it in the portal's task list.
+    {
+      templateKey: 'job_assigned',
+      channel: 'inapp',
+      audience: assigneeAudience,
+      payload: jobAssignedPayload,
+    },
+    {
+      templateKey: 'job_assigned',
+      channel: 'push',
+      audience: STORE_BELL,
+      payload: jobAssignedPayload,
+    },
+  ],
+  'purchase.approved': [
+    {
+      templateKey: 'purchase_approved',
+      channel: 'push',
+      audience: ADMIN_BELL,
+      payload: purchaseApprovedPayload,
+    },
+  ],
+  'feedback.received': [
+    {
+      templateKey: 'feedback_received',
+      channel: 'push',
+      audience: ADMIN_BELL,
+      payload: feedbackReceivedPayload,
+    },
+  ],
+  // ── Order lifecycle (plan P1) ─────────────────────────────────────────────
+  'order.proposed': [
+    // The manager's Console bell: a new proposal is waiting for verification.
+    {
+      templateKey: 'order_proposed',
+      channel: 'inapp',
+      audience: [{ ...ADMIN_BELL[0], channels: ['inapp'] }],
+      payload: orderLifecyclePayload,
+    },
+    // Push to the manager as well (skipped rows when VAPID is not configured).
+    {
+      templateKey: 'order_proposed',
+      channel: 'push',
+      audience: [{ ...ADMIN_BELL[0], channels: ['push'] }],
+      payload: orderLifecyclePayload,
+    },
+    // The proposer + customer support see it land in their portal bells.
+    {
+      templateKey: 'order_proposed',
+      channel: 'inapp',
+      audience: proposalAudience,
+      payload: orderLifecyclePayload,
+    },
+  ],
+  'order.proposed.shared': [
+    // "Link appears in the manager's queue" (plan §8 matrix).
+    {
+      templateKey: 'order_proposed_shared',
+      channel: 'inapp',
+      audience: [{ ...ADMIN_BELL[0], channels: ['inapp'] }],
+      payload: orderLifecyclePayload,
+    },
+  ],
+  'order.confirmed': [
+    // Phone verification done — tell the salesperson their proposal landed.
+    {
+      templateKey: 'order_confirmed',
+      channel: 'inapp',
+      audience: proposerAudience,
+      payload: orderLifecyclePayload,
+    },
+  ],
 };
-
+
+
+async function laundryReadyAudience(client: PoolClient, event: DomainEvent): Promise<Audience[]> {
+  const { rows } = await client.query<{ phone: string; email: string }>(
+    `SELECT COALESCE(c.phone, '') AS phone, COALESCE(c.email, '') AS email
+     FROM laundry_orders o LEFT JOIN customers c ON c.id = o.customer_id WHERE o.id = $1`,
+    [event.entityId],
+  );
+  if (!rows.length) return [];
+  const audiences: Audience[] = [];
+  // The customer hears on every channel they have an address for.
+  const customerAddress = rows[0].phone || rows[0].email || '';
+  if (customerAddress) {
+    audiences.push({ customer_id: null, employee_id: null, to_address: customerAddress });
+  }
+  // …and the admin console rings its bell (plan F3: laundry.ready → admin).
+  audiences.push({ customer_id: null, employee_id: null, to_address: 'app:admin', channels: ['inapp'] });
+  return audiences;
+}
+
+async function laundryReadyPayload(client: PoolClient, event: DomainEvent): Promise<Record<string, unknown>> {
+  const { rows } = await client.query<{ number: string; customer_name: string | null; total: number }>(
+    `SELECT o.number, o.total::float8 AS total, c.name AS customer_name
+     FROM laundry_orders o LEFT JOIN customers c ON c.id = o.customer_id WHERE o.id = $1`,
+    [event.entityId],
+  );
+  if (!rows.length) return {};
+  const r = rows[0];
+  return {
+    order_number: r.number,
+    customer_name: r.customer_name ?? 'the customer',
+    total: money(r.total),
+  };
+}
+
+async function assigneeAudience(client: PoolClient, event: DomainEvent): Promise<Audience[]> {
+  const { rows } = await client.query<{ employee_id: string; name: string }>(
+    `SELECT a.employee_id::text AS employee_id, e.name
+     FROM job_assignments a JOIN employees e ON e.id = a.employee_id
+     WHERE a.job_id = $1`,
+    [event.entityId],
+  );
+  return rows.map((r) => ({ customer_id: null, employee_id: r.employee_id, to_address: r.name, channels: ['inapp'] as const }));
+}
+
+async function jobAssignedPayload(client: PoolClient, event: DomainEvent): Promise<Record<string, unknown>> {
+  const { rows } = await client.query<{ number: string; customer_name: string | null; service_name: string | null; scheduled: string | null; address: string | null }>(
+    `SELECT j.number, c.name AS customer_name, s.name AS service_name,
+            j.scheduled_date::text AS scheduled, j.site_address AS address
+     FROM jobs j
+     LEFT JOIN customers c ON c.id = j.customer_id
+     LEFT JOIN services s ON s.id = j.service_id
+     WHERE j.id = $1`,
+    [event.entityId],
+  );
+  if (!rows.length) return {};
+  const r = rows[0];
+  return {
+    job_number: r.number,
+    customer_name: r.customer_name ?? 'a customer',
+    service_name: r.service_name ?? '',
+    scheduled: r.scheduled ?? '',
+    address: r.address ?? '',
+  };
+}
+
+async function purchaseApprovedPayload(client: PoolClient, event: DomainEvent): Promise<Record<string, unknown>> {
+  const { rows } = await client.query<{ description: string; qty: number; value: number; requested_by: string; item_name: string | null }>(
+    `SELECT p.description, p.qty::float8 AS qty, p.value::float8 AS value, p.requested_by,
+            i.name AS item_name
+     FROM purchase_requests p LEFT JOIN inventory_items i ON i.id = p.item_id
+     WHERE p.id = $1`,
+    [event.entityId],
+  );
+  if (!rows.length) return {};
+  const r = rows[0];
+  return {
+    item: r.item_name ?? r.description,
+    qty: r.qty,
+    value: money(r.value),
+    requested_by: r.requested_by,
+  };
+}
+
+async function feedbackReceivedPayload(client: PoolClient, event: DomainEvent): Promise<Record<string, unknown>> {
+  const { rows } = await client.query<{ rating: number; comment: string; customer_name: string | null; job_number: string | null }>(
+    `SELECT f.rating::float8 AS rating, f.comment, c.name AS customer_name, j.number AS job_number
+     FROM feedback f
+     LEFT JOIN customers c ON c.id = f.customer_id
+     LEFT JOIN jobs j ON j.id = f.job_id
+     WHERE f.id = $1`,
+    [event.entityId],
+  );
+  if (!rows.length) return {};
+  const r = rows[0];
+  return {
+    rating: r.rating,
+    customer_name: r.customer_name ?? 'A customer',
+    job_number: r.job_number ?? '',
+    comment: (r.comment || '').slice(0, 140),
+  };
+}
+
+/** Payload for the order-lifecycle events (plan §8: order.proposed / confirmed). */
+async function orderLifecyclePayload(client: PoolClient, event: DomainEvent): Promise<Record<string, unknown>> {
+  const { rows } = await client.query<{
+    number: string; customer_name: string | null; service_name: string | null;
+    date: string; proposed_by_name: string | null;
+  }>(
+    `SELECT j.number, c.name AS customer_name, s.name AS service_name,
+            j.date::text AS date, e.name AS proposed_by_name
+     FROM jobs j
+     LEFT JOIN customers c ON c.id = j.customer_id
+     LEFT JOIN services s ON s.id = j.service_id
+     LEFT JOIN employees e ON e.id = j.proposed_by
+     WHERE j.id = $1`,
+    [event.entityId],
+  );
+  if (!rows.length) return {};
+  const r = rows[0];
+  return {
+    job_number: r.number,
+    customer_name: r.customer_name ?? 'a customer',
+    service_name: r.service_name ?? '',
+    requested_date: r.date ?? '',
+    proposed_by: r.proposed_by_name ?? 'the team',
+  };
+}
+
+/**
+ * order.proposed audience: the salesperson who created it (confirmation their
+ * proposal landed) plus every customer-support employee — the two portal
+ * roles that pick proposals up. Pinned to inapp (same pattern as
+ * assigneeAudience): dispatchEvent fans out on the picked channel set, not
+ * rule.channel.
+ */
+async function proposalAudience(client: PoolClient, event: DomainEvent): Promise<Audience[]> {
+  const { rows: jobRows } = await client.query<{ proposed_by: string | null; proposed_by_name: string | null }>(
+    `SELECT j.proposed_by::text AS proposed_by, e.name AS proposed_by_name
+     FROM jobs j LEFT JOIN employees e ON e.id = j.proposed_by
+     WHERE j.id = $1`,
+    [event.entityId],
+  );
+  const { rows: staff } = await client.query<{ id: string; name: string }>(
+    `SELECT id, name FROM employees
+      WHERE role = 'csr' AND active AND deleted_at IS NULL`,
+  );
+  const audience: Audience[] = staff.map((s) => ({
+    customer_id: null, employee_id: s.id, to_address: s.name, channels: ['inapp'],
+  }));
+  const proposer = jobRows[0];
+  if (proposer?.proposed_by && !staff.some((s) => s.id === proposer.proposed_by)) {
+    audience.push({
+      customer_id: null,
+      employee_id: proposer.proposed_by,
+      to_address: proposer.proposed_by_name ?? proposer.proposed_by,
+      channels: ['inapp'],
+    });
+  }
+  return audience;
+}
+
+/** order.confirmed audience: the person who proposed it ("you're booked"). */
+async function proposerAudience(client: PoolClient, event: DomainEvent): Promise<Audience[]> {
+  const { rows } = await client.query<{ proposed_by: string | null; proposed_by_name: string | null }>(
+    `SELECT j.proposed_by::text AS proposed_by, e.name AS proposed_by_name
+     FROM jobs j LEFT JOIN employees e ON e.id = j.proposed_by
+     WHERE j.id = $1`,
+    [event.entityId],
+  );
+  const job = rows[0];
+  if (!job?.proposed_by) return [];
+  return [{
+    customer_id: null,
+    employee_id: job.proposed_by,
+    to_address: job.proposed_by_name ?? job.proposed_by,
+    channels: ['inapp'],
+  }];
+}
+
 /**
  * Dispatch a domain event into notification rows. Must run inside the caller's
  * transaction (the caller owns the connection). After rows are inserted, the
@@ -345,14 +647,20 @@ export async function dispatchEvent(client: PoolClient, event: DomainEvent): Pro
   const hasEmail = !!process.env.SMTP_HOST;
 
   for (const rule of rules) {
-    const audiences = await rule.audience(client, event);
+    const audiences = Array.isArray(rule.audience) ? rule.audience : await rule.audience(client, event);
     const basePayload = await rule.payload(client, event);
 
     for (const audience of audiences) {
       // Resolve customer for opt-in + WhatsApp number checks.
       let resolvedCustomerId: string | null = audience.customer_id;
+      // Synthetic app-bell rows keep customer/employee NULL so the scoped
+      // bell queries (F2) can match them on to_address alone.
+      const syntheticBell = audience.to_address.startsWith('app:');
+      // Synthetic app bells (F2) and push recipients are not attached to a
+      // customer/employee, so resolvedCustomerId stays NULL (they are
+      // surfaced by scoped bell queries and push send, not by customer_id).
       let customer: { opt_in: boolean; whatsapp_number: string } | null = null;
-      if (event.type === 'job.completed' || event.type === 'job.created') {
+      if (event.type === 'job.completed' || event.type === 'job.created' || event.type === 'job.assigned') {
         const c = await customerForJob(client, event.entityId);
         if (c) {
           customer = { opt_in: c.opt_in, whatsapp_number: c.whatsapp_number };
@@ -361,18 +669,28 @@ export async function dispatchEvent(client: PoolClient, event: DomainEvent): Pro
           resolvedCustomerId = audience.customer_id ?? c.id;
         }
       }
-      const channels = pickChannels(settings, hasWhatsApp, hasSms, hasEmail);
+      const picked = pickChannels(settings, hasWhatsApp, hasSms, hasEmail);
+      // Synthetic or pinned audiences restrict their own channel set; the
+      // channelEnabled check below still records 'skipped' rows for the rest.
+      const channelList = audience.channels ?? picked;
 
       const scheduledFor = rule.scheduledFor ? rule.scheduledFor(settings) : null;
 
-      for (const channel of channels) {
+      for (const channel of channelList) {
+        if (((event.type === 'laundry.ready' || event.type === 'laundry.collected') && !syntheticBell) || channel === 'push') {
+          const lr = await client.query<{ customer_id: string | null }>(
+            `SELECT customer_id FROM laundry_orders WHERE id = $1`,
+            [event.entityId],
+          );
+          resolvedCustomerId = resolvedCustomerId ?? lr.rows[0]?.customer_id ?? null;
+        }
         if (!channelEnabled(settings, channel)) {
           await client.query(
             `INSERT INTO notifications
                (template_key, channel, customer_id, employee_id, job_id, entity_type, entity_id,
                 to_address, payload, status, scheduled_for, error)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'skipped', $10, 'Channel credentials not configured')
-             ON CONFLICT (template_key, channel, entity_type, entity_id)
+             ON CONFLICT (template_key, channel, entity_type, entity_id, to_address)
              WHERE notifications.status <> 'failed' DO NOTHING`,
             [
               rule.templateKey, channel,
@@ -393,7 +711,7 @@ export async function dispatchEvent(client: PoolClient, event: DomainEvent): Pro
              (template_key, channel, customer_id, employee_id, job_id, entity_type, entity_id,
               to_address, payload, scheduled_for)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-           ON CONFLICT (template_key, channel, entity_type, entity_id)
+           ON CONFLICT (template_key, channel, entity_type, entity_id, to_address)
            WHERE notifications.status <> 'failed' DO NOTHING`,
           [
             rule.templateKey, channel,
@@ -478,12 +796,16 @@ export async function recordFeedback(
     );
     if (!fr.rows.length) { await client.query('ROLLBACK'); return false; }
     const req = fr.rows[0];
-    await client.query(
+    const inserted = await client.query<{ id: string }>(
       `INSERT INTO feedback (token, job_id, customer_id, rating, comment, employee_ids, source)
-       VALUES ($1, $2, $3, $4, $5, $6, 'web')`,
+       VALUES ($1, $2, $3, $4, $5, $6, 'web') RETURNING id`,
       [token, req.job_id, req.customer_id, rating, comment, employeeIds],
     );
     await client.query(`UPDATE feedback_requests SET used_at = NOW(), rating = $1, comment = $2 WHERE token = $3`, [rating, comment, token]);
+    // Ring the admin bell (plan v5 F3: feedback.received → admin).
+    if (inserted.rows[0]) {
+      await dispatchEvent(client, { type: 'feedback.received', entityType: 'feedback', entityId: inserted.rows[0].id });
+    }
     await client.query('COMMIT');
     return true;
   } catch {
@@ -503,6 +825,40 @@ function inappAdapter(_payload: Record<string, unknown>, _toAddress: string): Se
     return { ok: true, providerRef: 'sse' };
   } catch {
     return { ok: true, providerRef: 'sse' };
+  }
+}
+
+/** Push adapter: send a VAPID push to a subscription's service worker. Disabled
+ *  when VAPID credentials are absent (lazy validation, plan §F4.2). */
+async function pushAdapter(
+  payload: Record<string, unknown>,
+  toAddress: string,
+): Promise<SendResult> {
+  if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+    return { ok: false, error: 'VAPID keys not configured' };
+  }
+  try {
+    const subscription = JSON.parse(toAddress) as {
+      endpoint: string;
+      keys: { p256dh: string; auth: string };
+    };
+    webpush.setVapidDetails(
+      `mailto:${process.env.VAPID_EMAIL || 'admin@gabfix.local'}`,
+      process.env.VAPID_PUBLIC_KEY,
+      process.env.VAPID_PRIVATE_KEY,
+    );
+    const options = {
+      TTL: 24 * 60 * 60, // 24h delivery window
+      subject: 'mailto:admin@gabfix.local',
+    };
+    await webpush.sendNotification(subscription, JSON.stringify(payload), options);
+    return { ok: true, providerRef: subscription.endpoint };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('404') || message.includes('Not Found') || message.includes('Unsubscription')) {
+      return { ok: false, error: 'Subscription no longer valid' };
+    }
+    return { ok: false, error: message };
   }
 }
 
@@ -665,13 +1021,14 @@ async function sendOne(client: PoolClient, row: NotificationRow): Promise<boolea
     case 'email': result = await emailAdapter(template, payload, row.to_address); break;
     case 'sms': result = await smsAdapter(payload, row.to_address, renderedBody); break;
     case 'whatsapp': result = await whatsappAdapter(template, payload, row.to_address); break;
+    case 'push': result = await pushAdapter(payload, row.to_address); break;
     default: result = { ok: false, error: `Unknown channel ${row.channel}` };
   }
 
   if (result.ok) {
     await client.query(
       `UPDATE notifications SET status = $1, provider_ref = $2, sent_at = NOW(), attempts = attempts + 1 WHERE id = $3`,
-      [row.channel === 'inapp' ? 'read' : 'sent', result.providerRef ?? null, row.id],
+      [row.channel === 'inapp' ? 'read' : row.channel === 'push' ? 'sent' : 'sent', result.providerRef ?? null, row.id],
     );
     return true;
   } else {
@@ -696,14 +1053,55 @@ export type BellNotification = {
   created_at: Date;
 };
 
-/** Unread in-app notifications for a customer (the bell panel). */
-export async function unreadNotifications(customerId: string): Promise<BellNotification[]> {
+export type BellScope = 'admin' | 'laundry' | 'portal' | 'store';
+
+/** Which synthetic bell each app listens to; `admin` also sees customer rows. */
+const SCOPE_TO_ADDRESS: Record<BellScope, string> = {
+  admin: 'app:admin',
+  laundry: 'app:laundry',
+  portal: 'app:portal',
+  store: 'app:store',
+};
+
+/**
+ * Unread in-app notifications for a bell panel (plan v5 F2).
+ *
+ * `customerId` surfaces customer-addressed rows (completion messages, …);
+ * `employeeId` surfaces rows assigned to the logged-in staff member
+ * (job.assigned); `scope` adds the app-addressed synthetic bell so each
+ * console only sees the events that concern it (purchase.approved → store,
+ * feedback.received → admin).`sinceId`/`limit` keep the panel cheap.
+ */
+export async function unreadNotifications(
+  customerId: string,
+  options: { employeeId?: string; scope?: BellScope; since?: string; limit?: number } = {},
+): Promise<BellNotification[]> {
+  const params: unknown[] = [];
+  const ors: string[] = [];
+  if (customerId) {
+    params.push(customerId);
+    ors.push(`customer_id = $${params.length}`);
+  }
+  if (options.employeeId) {
+    params.push(options.employeeId);
+    ors.push(`employee_id = $${params.length}::uuid`);
+  }
+  if (options.scope) {
+    params.push(SCOPE_TO_ADDRESS[options.scope]);
+    ors.push(`(employee_id IS NULL AND customer_id IS NULL AND to_address = $${params.length})`);
+  }
+  let where = ors.length ? `(${ors.join(' OR ')})` : 'FALSE';
+  where += ` AND status IN ('queued','sent','delivered','read') AND read_at IS NULL`;
+  if (options.since) {
+    params.push(options.since);
+    where += ` AND created_at > $${params.length}::timestamptz`;
+  }
+  params.push(Math.min(Math.max(options.limit ?? 50, 1), 100));
   const { rows } = await pool.query<BellNotification>(
     `SELECT id, template_key, channel, entity_type, entity_id, status, payload, created_at
-     FROM notifications WHERE customer_id = $1
-     AND status IN ('queued','sent','delivered','read') AND read_at IS NULL
-     ORDER BY created_at DESC LIMIT 50`,
-    [customerId],
+     FROM notifications WHERE ${where}
+     ORDER BY created_at DESC LIMIT $${params.length}`,
+    params,
   );
   return rows;
 }
@@ -717,6 +1115,33 @@ export async function markNotificationRead(id: string): Promise<boolean> {
   return (rowCount ?? 0) > 0;
 }
 
+/** Mark every notification visible to one bell (customer/employee/app) as read. */
+export async function markAllNotificationsRead(
+  options: { customerId?: string; employeeId?: string; scope?: BellScope } = {},
+): Promise<number> {
+  const params: unknown[] = [];
+  const ors: string[] = [];
+  if (options.customerId) {
+    params.push(options.customerId);
+    ors.push(`customer_id = $${params.length}`);
+  }
+  if (options.employeeId) {
+    params.push(options.employeeId);
+    ors.push(`employee_id = $${params.length}::uuid`);
+  }
+  if (options.scope) {
+    params.push(SCOPE_TO_ADDRESS[options.scope]);
+    ors.push(`(employee_id IS NULL AND customer_id IS NULL AND to_address = $${params.length})`);
+  }
+  if (!ors.length) return 0;
+  const { rowCount } = await pool.query(
+    `UPDATE notifications SET status = 'read', read_at = NOW()
+     WHERE (${ors.join(' OR ')}) AND status IN ('queued','sent','delivered') AND read_at IS NULL`,
+    params,
+  );
+  return rowCount ?? 0;
+}
+
 /** Health-check: report which channels are operational. */
 export async function channelStatus(settings: Settings): Promise<Record<Channel, boolean>> {
   return {
@@ -724,5 +1149,6 @@ export async function channelStatus(settings: Settings): Promise<Record<Channel,
     sms: _isChannelEnabled(settings, 'sms'),
     email: _isChannelEnabled(settings, 'email'),
     inapp: true,
+    push: _isChannelEnabled(settings, 'push'),
   };
 }

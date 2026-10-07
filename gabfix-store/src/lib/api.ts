@@ -9,6 +9,14 @@ export type StaffSession = {
   app_scope: string[];
 };
 
+/** Result of validating an invite code on the public sign-up flow. */
+export type InviteValidation = {
+  valid: boolean;
+  role: string;
+  app_scope: string[];
+  expires_at: string;
+};
+
 type TokenPair = { accessToken: string; refreshToken: string; user: StaffSession };
 
 const BASE_URL = import.meta.env["VITE_API_BASE_URL"] ?? "";
@@ -66,7 +74,8 @@ export const storeApi = {
   /**
    * Staff authentication against the Gabfix server API.
    * Canonical contract: POST /api/auth/login → {accessToken, refreshToken, user}.
-   * Staff accounts are admin-created — there is no sign-up.
+   * Staff accounts are created via single-use invite codes issued by an Admin
+   * (see `storeApi.auth.validateInvite` + `storeApi.auth.signUp` in the sign-up flow).
    */
   auth: {
     async login(identifier: string, password: string): Promise<StaffSession> {
@@ -123,6 +132,29 @@ export const storeApi = {
 
     isAuthenticated() {
       return Boolean(localStorage.getItem(ACCESS_TOKEN_KEY));
+    },
+    /** Validates an admin-issued invite code for the public sign-up flow. */
+    validateInvite(code: string): Promise<InviteValidation> {
+      return storeApi.request<InviteValidation>(`/auth/invites/${encodeURIComponent(code)}/validate`);
+    },
+    /**
+     * Consumes a valid invite code to create a storekeeper account with exactly
+     * the role + app scopes granted by the code, then stores the issued token pair
+     * (mirroring `login`) so the new hire lands in as an authenticated session.
+     */
+    async signUp(payload: {
+      inviteCode: string;
+      name: string;
+      email: string;
+      password: string;
+    }): Promise<StaffSession> {
+      const body = await storeApi.request<TokenPair>("/auth/sign-up", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      localStorage.setItem(ACCESS_TOKEN_KEY, body.accessToken);
+      localStorage.setItem(REFRESH_TOKEN_KEY, body.refreshToken);
+      return body.user;
     },
   },
 };

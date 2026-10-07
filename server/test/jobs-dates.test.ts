@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseBody } from '../validation/common';
 import { jobsResource } from '../validation/resources';
-import { pool } from '../db';
+import { pool, getData } from '../db';
 import { migrate } from '../migrate';
 
 // ── Pure schema tests (no database) ────────────────────────────────────────
@@ -152,6 +152,45 @@ if (dbUp) {
       throw error;
     } finally {
       client.release();
+    }
+    });
+
+  test('Phase 1c: /api/data exposes the jobAssignments/jobEvents/timesheets/jobCosts slices', { timeout: 20_000 }, async () => {
+    const run = Date.now().toString(36);
+    const jobId = `jread-${run}`;
+    const employeeId = '00000000-0000-4000-8000-000000000001';
+    try {
+      await pool.query(
+        `INSERT INTO jobs (id, number, customer_id, service_id, date, status, revenue, scheduled_date)
+           VALUES ($1, $2, 'c1', 's1', '2026-09-27', 'In Progress', 1000, '2026-09-27')`,
+        [jobId, `JOB-READ-${run}`],
+      );
+      await pool.query(
+        `INSERT INTO job_assignments (job_id, employee_id, role)
+           VALUES ($1, $2, 'technician')`,
+        [jobId, employeeId],
+      );
+      await pool.query(
+        `INSERT INTO job_events (job_id, kind, actor_employee_id, payload)
+           VALUES ($1, 'started', $2, '{"via":"test"}')`,
+        [jobId, employeeId],
+      );
+
+      const data = await getData();
+      const assignments = (data.jobAssignments ?? []) as Array<{ jobId: string }>;
+      assert.ok(
+        assignments.some((a) => a.jobId === jobId),
+        'jobAssignments slice should expose the seeded assignment',
+      );
+      const events = (data.jobEvents ?? []) as Array<{ jobId: string; kind: string }>;
+      assert.ok(
+        events.some((e) => e.jobId === jobId && e.kind === 'started'),
+        'jobEvents slice should expose the lifecycle event',
+      );
+      assert.ok(Array.isArray(data.timesheets), 'timesheets slice is exposed');
+      assert.ok(Array.isArray(data.jobCosts), 'jobCosts slice is exposed');
+    } finally {
+      await pool.query(`DELETE FROM jobs WHERE id = $1`, [jobId]);
     }
   });
 } else {

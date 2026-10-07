@@ -39,9 +39,11 @@ import {
 
 
 import { Button } from "@/components/ui/button";
+import { ScopeBell } from "@/components/ScopeBell";
 import { apiClient, type StaffSession } from "@/lib/api";
 import { useWorkspaceMetrics } from "@/lib/workspace";
 import { useWorkspaceData } from "@/lib/workspace-data";
+import { useSession } from "@/lib/session";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -59,14 +61,13 @@ const navGroups = [
       { label: "Finance", icon: CircleDollarSign, navigateTo: "finance" },
       { label: "Customers", icon: Users, navigateTo: "customers" },
     ],
-  },
-  {
-    label: "Operations",
+  },    { label: "Operations",
     items: [
       { label: "Inventory", icon: Boxes, navigateTo: "inventory" },
       { label: "Assets", icon: HardHat, navigateTo: "assets" },
       { label: "Devices", icon: Radio, navigateTo: "devices" },
-      { label: "Staff", icon: Users, navigateTo: "employees" },
+            { label: "Staff", icon: Users, navigateTo: "employees" },
+      { label: "Permissions", icon: ShieldCheck, navigateTo: "permission-matrix" },
       { label: "Messages", icon: MessageSquareText, navigateTo: "messages" },
       { label: "Sync health", icon: Wifi, navigateTo: "sync-health" },
     ],
@@ -203,7 +204,7 @@ export function AdminDashboard({
 }) {
   const live = useWorkspaceMetrics();
   const { data: workspace } = useWorkspaceData();
-  const [session, setSession] = useState<StaffSession | null>(null);
+  const session = useSession();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -415,10 +416,12 @@ export function AdminDashboard({
             >
               {dark ? <Sun /> : <Moon />}
             </Button>
-            <Button variant="ghost" size="icon" aria-label="Notifications" className="relative">
-              <Bell />
-              <span className="absolute right-2 top-2 size-1.5 rounded-full bg-destructive ring-2 ring-background" />
-            </Button>
+            <ScopeBell
+              scope="admin"
+              tokenKey="gabfix-admin:auth-token"
+              title="Notifications"
+              emptyText="You're all caught up — new events appear here live."
+            />
             <div className="mx-1 h-6 w-px bg-border" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -427,15 +430,24 @@ export function AdminDashboard({
                     GA
                   </span>
                   <span className="hidden text-left sm:block">
-                    <span className="block text-xs font-semibold">Grace Atim</span>
-                    <span className="block text-[10px] text-muted-foreground">Administrator</span>
+                    <span className="block text-xs font-semibold">{session?.name ?? "—"}</span>
+                    <span className="block text-[10px] text-muted-foreground">{session?.role ?? "Administrator"}</span>
                   </span>
                   <ChevronDown className="size-3 text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem>Account settings</DropdownMenuItem>
-                <DropdownMenuItem>Sign out</DropdownMenuItem>
+                                <DropdownMenuItem
+                  onClick={() => {
+                    localStorage.removeItem('gabfix-admin:auth-token');
+                    localStorage.removeItem('gabfix-admin:refresh-token');
+                    void apiClient.auth.signOut();
+                    window.location.assign('/auth');
+                  }}
+                >
+                  Sign out
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -447,7 +459,7 @@ export function AdminDashboard({
               <p className="mb-1 text-xs font-medium text-primary">Monday, 28 September</p>
               <h1 className="text-2xl font-semibold sm:text-[28px]">Good afternoon, Grace</h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                Here’s what’s happening across Gabfix today.
+                Here’s what’s happening across Gabfix today, {session?.name ?? "friend"}.
               </p>
             </div>
             <DropdownMenu>

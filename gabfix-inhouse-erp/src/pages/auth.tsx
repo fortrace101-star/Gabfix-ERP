@@ -38,7 +38,7 @@ export default function AuthPage() {
   return (
     <main className="auth-page">
       <section className="auth-brand">
-        <img src="/gabfix-mark.png" alt="Gabfix" />
+        <img src="/gabfix-logo.png" alt="Gabfix" />
         <div>
           <p>GABFIX HOME SOLUTIONS</p>
           <h1>
@@ -52,7 +52,7 @@ export default function AuthPage() {
       <section className="auth-form-wrap">
         <form className="auth-form" onSubmit={signIn}>
           <div className="auth-logo">
-            <img src="/gabfix-mark.png" alt="" />
+            <img src="/gabfix-logo.png" alt="Gabfix" />
             <strong>Gabfix Portal</strong>
           </div>
           <div>

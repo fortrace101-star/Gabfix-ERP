@@ -27,12 +27,15 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { jobs as demoJobs, roleCopy, type Job, type Role } from "@/lib/portal-data";
+import { roleCopy, type Job, type Role } from "@/lib/portal-data";
 import { setJobStatus, subscribeToJobEvents, useMyJobs, type PortalJob } from "@/lib/workspace";
 import { useEffect, useMemo, useState } from "react";
 import { useBeacon } from "@/lib/beacon";
 import { useDocumentTitle } from "@/lib/use-document-title";
 import { useSession } from "@/lib/session";
+import { TimesheetsPage } from "@/pages/timesheets";
+import { CostsPage } from "@/pages/costs";
+import { DocumentsPage } from "@/pages/documents";
 
 const roles: Role[] = ["Technician", "Sales", "Supervisor", "Accountant-field"];
 const nav = [
@@ -42,8 +45,7 @@ const nav = [
   { label: "Timesheets", icon: Clock3 },
   { label: "Costs", icon: WalletCards, count: 2 },
   { label: "Documents", icon: FileText },
-];
-
+]; // Board labels: live component keyed by label.
 function StatusBadge({ status }: { status: Job["status"] }) {
   return (
     <span className={`status status-${status.toLowerCase()}`}>
@@ -58,19 +60,46 @@ export default function PortalPage() {
     "My Day — Gabfix Portal",
     "Gabfix Home Solutions employee operations portal for jobs, crews, sales, and field costs.",
   );
-  const session = useSession();
+  const { session } = useSession();
   const [role, setRole] = useState<Role>("Technician");
-  const { jobs: liveJobs, error: jobsError } = useMyJobs(session?.name ?? null);
+  const {
+    jobs: liveJobs,
+    error: jobsError,
+    assignedJobIds,
+  } = useMyJobs(session?.name ?? null, session?.id ?? null);
   const [tick, setTick] = useState(0);
   const [transition, setTransition] = useState<PortalJob | null>(null);
   const [acting, setActing] = useState(false);
   const refresh = () => setTick((t) => t + 1);
   useEffect(() => subscribeToJobEvents(refresh), []);
-  const [selectedJob, setSelectedJob] = useState<Job | null>(null);
-  const [mobileNav, setMobileNav] = useState(false);
+    const [mobileNav, setMobileNav] = useState(false);
   const [active, setActive] = useState("My day");
   const copy = roleCopy[role];
-  const visibleJobs = useMemo(() => (role === "Supervisor" ? demoJobs : demoJobs.slice(0, 3)), [role]);
+
+  // Live boards are keyed by nav label; only Timesheets, Costs and Documents
+  // render real server-backed pages. A board earns its nav entry only when it
+  // renders a live component here — no toast doubles as a "not yet live"
+  // backlog. (Schedule stays a static preview until the server schedule
+  // endpoint exists.)
+  const activeEmployeeId: string | null = session?.id ?? null;
+  const board =
+    active === "Timesheets" ? (
+      <TimesheetsPage employeeId={activeEmployeeId!} />
+    ) : active === "Costs" ? (
+      <CostsPage employeeId={activeEmployeeId!} />
+    ) : active === "Documents" ? (
+      <DocumentsPage employeeId={activeEmployeeId!} />
+    ) : null;
+
+  // Sidebar/Nav + job list render identically across every preview role;
+  // only the KPI strip and its values derive from roleCopy (roleCopy stays
+  // used for copy, not for gating navigation or job rows).
+  // The sidebar is role-identical — the nav list is the live checklist and
+  // the same for every preview role. Only the KPI strip (role-derived copy)
+  // and the KPI values change per role; the job list itself renders
+  // identically so the portal surface does not double as a role pivot menu.
+    const focusJob = liveJobs?.find((j) => j.mine && j.status === "In Progress") ?? null;
+  // Role-derived KPI strip (role is a preview selector, not a nav gate).
   const kpis =
     role === "Sales"
       ? [
@@ -103,14 +132,16 @@ export default function PortalPage() {
   const selectNav = (label: string) => {
     setActive(label);
     setMobileNav(false);
-    if (label !== "My day" && label !== "My trail") toast(`${label} is ready for backend connection`);
+    // A board earns its nav entry only when it renders a live component; the
+    // map above (liveBoards) is the single gate. No toast doubles as a
+    // "not yet live" backlog — the label list is the live checklist.
   };
 
   return (
     <div className="portal-shell">
       <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`}>
         <div className="brand">
-          <img src="/gabfix-mark.png" alt="Gabfix" />
+          <img src="/gabfix-logo.png" alt="Gabfix" />
           <div>
             <strong>Gabfix</strong>
             <span>EMPLOYEE PORTAL</span>
@@ -260,65 +291,51 @@ export default function PortalPage() {
                           ? "Recent submissions"
                           : "Today’s jobs"}
                   </h2>
-                  <p>{visibleJobs.length} items assigned to your view</p>
+                  <p> {(liveJobs ?? []).length} jobs in your view</p>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => toast("All items loaded")}>
                   View all
                 </Button>
               </div>
               <div className="job-list">
-                {(liveJobs ?? []).slice(0, role === "Supervisor" ? 12 : 6).map((lj) => (
-                  <button
-                    className="job-row"
-                    key={lj.id}
-                    onClick={() =>
-                      setTransition(lj)
-                    }
-                  >
-                    <div className="time">
-                      <strong>{lj.date}</strong>
-                      <span>{lj.number}</span>
-                    </div>
-                    <div className="job-title">
-                      <strong>{lj.service}</strong>
-                      <span>
-                        {lj.customer} · {lj.mine ? "assigned to you" : "crew"}
+                {(liveJobs ?? [])
+                  // Role identifies which board the user is previewing via the
+                  // topbar <select>; it does not gate the job rows or the right
+                  // stack, so the sidebar stays role-identical for every role.
+                  .slice(0, 6)
+                  .map((lj) => (
+                    <button className="job-row" key={lj.id} onClick={() => setTransition(lj)}>
+                      <div className="time">
+                        <strong>{lj.date}</strong>
+                        <span>{lj.number}</span>
+                      </div>
+                      <div className="job-title">
+                        <strong>{lj.service}</strong>
+                        <span>
+                          {lj.customer} · {lj.mine ? "assigned to you" : "crew"}
+                        </span>
+                      </div>
+                      <span
+                        className={`status status-` + lj.status.toLowerCase().replace(" ", "-")}
+                      >
+                        <span />
+                        {lj.status}
                       </span>
-                    </div>
-                    <span className={"status status-" + lj.status.toLowerCase().replace(" ", "-")}>
-                      <span />
-                      {lj.status}
-                    </span>
-                    <span className="job-value">
-                      {new Intl.NumberFormat("en-UG", { style: "currency", currency: "UGX", maximumFractionDigits: 0 }).format(lj.revenue)}
-                    </span>
-                    <ChevronRight />
-                  </button>
-                ))}
+                      <span className="job-value">
+                        {new Intl.NumberFormat("en-UG", {
+                          style: "currency",
+                          currency: "UGX",
+                          maximumFractionDigits: 0,
+                        }).format(lj.revenue)}
+                      </span>
+                      <ChevronRight />
+                    </button>
+                  ))}
                 {liveJobs === null && !jobsError && (
                   <p className="px-4 py-6 text-sm text-muted-foreground">Loading jobs…</p>
                 )}
-                {jobsError && (
-                  <p className="px-4 py-6 text-sm text-destructive">{jobsError}</p>
-                )}
-                {false && visibleJobs.map((job: Job) => (
-                  <button className="job-row" key={job.id} onClick={() => setSelectedJob(job)}>
-                    <div className="time">
-                      <strong>{job.time}</strong>
-                      <span>{job.id}</span>
-                    </div>
-                    <div className="job-title">
-                      <strong>{job.title}</strong>
-                      <span>
-                        {job.customer} · {job.location}
-                      </span>
-                    </div>
-                    <StatusBadge status={job.status} />
-                    <span className="job-value">{job.value}</span>
-                    <ChevronRight />
-                  </button>
-                ))}
-              </div>
+                {jobsError && <p className="px-4 py-6 text-sm text-destructive">{jobsError}</p>}
+                              </div>
             </section>
 
             <aside className="right-stack">
@@ -326,13 +343,13 @@ export default function PortalPage() {
                 <div className="panel-head">
                   <div>
                     <h2>Current focus</h2>
-                    <p>GF-2841 · 38 minutes active</p>
+                    <p>{focusJob ? focusJob.number + " " + focusJob.status : "No job in progress"}</p>
                   </div>
                   <MoreHorizontal />
                 </div>
-                <h3>Kitchen tap replacement</h3>
+                <h3>{focusJob?.service ?? "No job in progress"}</h3>
                 <p className="address">
-                  <MapPin /> Muyenga, Kampala
+                  <MapPin /> {focusJob?.customer ?? "No job in progress"}
                 </p>
                 <div className="progress-track">
                   <span />
@@ -354,93 +371,28 @@ export default function PortalPage() {
                   </div>
                   <CalendarDays />
                 </div>
-                {demoJobs.slice(1, 3).map((job) => (
-                  <div className="mini-job" key={job.id}>
-                    <strong>{job.time}</strong>
-                    <div>
-                      <b>{job.title}</b>
-                      <span>{job.location}</span>
+                                {(liveJobs ?? [])
+                  .filter((j) => j.status === "Scheduled")
+                  .slice(0, 2)
+                  .map((j) => (
+                    <div className="mini-job" key={j.id}>
+                      <strong>{j.date}</strong>
+                      <div>
+                        <b>{j.service}</b>
+                        <span>{j.customer}</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
               </section>
             </aside>
           </div>
+          {board && <div className="board-slot">{board}</div>}
         </main>
       </div>
 
       {active === "My trail" && <TrailPanel />}
 
-      <Sheet open={Boolean(selectedJob)} onOpenChange={(open) => !open && setSelectedJob(null)}>
-        <SheetContent className="job-sheet">
-          {selectedJob && (
-            <>
-              <SheetHeader>
-                <SheetTitle>{selectedJob.title}</SheetTitle>
-                <SheetDescription>
-                  {selectedJob.id} · {selectedJob.customer}
-                </SheetDescription>
-              </SheetHeader>
-              <div className="sheet-body">
-                <StatusBadge status={selectedJob.status} />
-                <div className="detail-block">
-                  <span>LOCATION</span>
-                  <strong>{selectedJob.location}</strong>
-                </div>
-                <div className="detail-grid">
-                  <div>
-                    <span>SCHEDULED</span>
-                    <strong>{selectedJob.time}</strong>
-                  </div>
-                  <div>
-                    <span>VALUE</span>
-                    <strong>{selectedJob.value}</strong>
-                  </div>
-                </div>
-                <div className="timeline">
-                  <h3>Job progress</h3>
-                  {["Quote", "Scheduled", "Started", "Completed", "Invoiced", "Paid"].map(
-                    (step, i) => (
-                      <div
-                        className={
-                          i <=
-                          (selectedJob.status === "Completed"
-                            ? 3
-                            : selectedJob.status === "Started"
-                              ? 2
-                              : 1)
-                            ? "timeline-done"
-                            : ""
-                        }
-                        key={step}
-                      >
-                        <i />
-                        <span>{step}</span>
-                      </div>
-                    ),
-                  )}
-                </div>
-                <Button className="w-full" onClick={() => toast.success("Job action saved")}>
-                  {selectedJob.status === "Scheduled"
-                    ? "Accept job"
-                    : selectedJob.status === "Started"
-                      ? "Complete job"
-                      : "Open job card"}
-                </Button>
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => toast("Job card preview will connect to the PDF service")}
-                >
-                  Preview job card
-                </Button>
-              </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
-
-      {transition && (
+            {transition && (
         <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
           <button
             aria-label="Close dialog"
@@ -501,13 +453,12 @@ export default function PortalPage() {
   );
 }
 
-/**
- * My trail (plan D3 — gap item 3): the field beacon panel. Starts the GPS
- * watch, POSTs pings to /api/telemetry/pings (geofences + live map on the
- * server side), and keeps an offline outbox that drains on reconnect.
- */
-function TrailPanel() {
-  const session = useSession();
+// TrailPanel is used for the "My trail" nav entry and is defined in this
+// module (it is not re-exported by @/lib/beacon — that module only exports
+// the useBeacon hook). The panel renders the GPS beacon with an offline
+// outbox that drains on reconnect.
+const TrailPanel = () => {
+  const { session } = useSession();
   const beacon = useBeacon(session?.id ?? null);
   const statusCopy: Record<string, string> = {
     idle: "Beacon off",
@@ -533,7 +484,7 @@ function TrailPanel() {
           </p>
         </div>
         <span
-          className={"status " + (live ? "status-in-progress" : "status-scheduled")}
+          className={`status ${live ? "status-in-progress" : "status-scheduled"}`}
           style={{ textTransform: "none" }}
         >
           <span />
@@ -597,4 +548,4 @@ function TrailPanel() {
       </div>
     </section>
   );
-}
+};

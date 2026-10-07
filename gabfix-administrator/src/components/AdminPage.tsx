@@ -34,7 +34,7 @@ export function AdminPage({
             <Button variant="ghost" size="icon" aria-label="Back" onClick={onBack}>
               <X />
             </Button>
-          )}
+        )}
           <div>
             <h1 className="text-lg font-semibold">{title}</h1>
             <p className="text-xs text-muted-foreground">{subtitle}</p>
@@ -48,7 +48,7 @@ export function AdminPage({
             {error}
           </p>
         )}
-        {loading ? (
+        {loading && !error ? (
           <div className="flex min-h-[30vh] items-center justify-center">
             <div className="size-8 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary" />
           </div>

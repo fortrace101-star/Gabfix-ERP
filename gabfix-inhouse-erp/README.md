@@ -1,52 +1,38 @@
-# Gabfix Portal (In-House ERP)
+# Fresh Start Rebuild
 
-Technician/staff portal: my jobs (quote → scheduled → started → completed →
-invoiced → paid), timesheets, cost capture, and the field beacon (GPS pings to
-the admin live map). One of four Gabfix ERP frontends, all backed by the same
-Express + PostgreSQL server (`../server`).
+Rebuilf the app in the zip folder attached with the theme in the image attached . Use the layout gudelines in the attached document.
 
-## Stack
+ Note: BUild it with react, vite and Typescript exculsively. No TanStack at all. Entry point should be app.jsx
 
-- React 19 + Vite + TypeScript
-- Tailwind CSS v4 (vendored design tokens; dark-mode parity)
-- react-router-dom; data access via `src/lib/api.ts` (`portalApi`)
-- vite-plugin-pwa (installable, beacon-friendly)
+Use the references below for UI Layout inspiration
+
+https://cdn.dribbble.com/userupload/34464872/file/original-59d4842da4167cba40aae98fa9bd8ba4.png?resize=1024x768&vertical=center
+
+https://cdn.dribbble.com/userupload/26099857/file/original-633e864c8372dfe40e885353b2e5c418.png?resize=1024x768&vertical=center
+
+https://cdn.dribbble.com/userupload/39803192/file/original-9fdddcce5d91277b6100c0b25a8e2a21.png?resize=1024x768&vertical=center
+
+https://cdn.dribbble.com/userupload/49186686/file/48611e88e033ba2cbd674ba213c51726.png?resize=1024x832&vertical=center
+
+https://cdn.dribbble.com/userupload/49199452/file/03c1a432c814391ae536e5905cfe176d.jpg?resize=1024x768&vertical=center
+
+This project was built with [Lovable](https://lovable.dev).
+
+## Build with Lovable
+
+Continue developing this project in the [Lovable editor](https://lovable.dev/projects/81be9bce-c8fd-4712-87da-31104aa98085).
+
+- **Ship faster**: describe what you want to build and Lovable handles the code.
+- **Stay in sync**: every change made in Lovable is committed straight to this repository.
+- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
 
 ## Development
 
+Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+
 ```sh
+git clone <this-repository-url>
+cd <repository-name>
 npm i
-npm run dev        # http://localhost:5175
-npm run typecheck
-npm run build
-```
-
-Copy `.env.example` to `.env`:
-
-```
-VITE_API_BASE_URL=http://localhost:5000/api
-VITE_APP_ID=portal
-```
-
-The server must be running first (`cd ../server && npm run dev`). Every request
-is tagged with the `X-App-Id: portal` header and shows up in the server console
-as `[portal] GET /api/... 200 12ms`, in `GET /api/logs` (admin-only), and on the
-SSE bus at `/api/events`.
-
-## Auth
-
-Staff accounts are created in the Admin Console — there is no self sign-up.
-Login goes to `POST /api/auth/login` (canonical contract: `{accessToken,
-refreshToken, user: {id, name, role, app_scope}}`); tokens are held in
-`localStorage` under `gabfix:auth-token` / `gabfix:refresh-token`. An employee
-can only reach this app if their account's `app_scope` includes `portal`.
-
-## Project map
-
-```
-src/
-├── lib/api.ts    Server API client (X-App-Id, bearer, 401→refresh→retry)
-├── lib/pwa.ts    Service worker registration (prod only)
-├── pages/        /auth, / (empty shell — Phase D fills it)
-└── components/   Vendored UI kit
+npm run dev
 ```

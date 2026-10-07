@@ -57,7 +57,12 @@ export function useBeacon(employeeId: string | null) {
   const [status, setStatus] = useState<BeaconStatus>("idle");
   const [deviceId, setDeviceId] = useState<string | null>(() => localStorage.getItem(DEVICE_KEY));
   const [deviceLabel, setDeviceLabel] = useState<string>("");
-  const [fix, setFix] = useState<{ lat: number; lng: number; accuracy: number | null; at: string } | null>(null);
+  const [fix, setFix] = useState<{
+    lat: number;
+    lng: number;
+    accuracy: number | null;
+    at: string;
+  } | null>(null);
   const [sent, setSent] = useState(0);
   const [queued, setQueued] = useState(() => readQueue().length);
   const [error, setError] = useState("");
@@ -159,7 +164,9 @@ export function useBeacon(employeeId: string | null) {
       return;
     }
     if (!deviceId) {
-      setError("No registered device for your account — ask an admin to register one on the Devices page.");
+      setError(
+        "No registered device for your account — ask an admin to register one on the Devices page.",
+      );
       return;
     }
     setError("");

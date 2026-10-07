@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { Client } from 'pg';
-import { seedData, ensureOwner, ensureStaff } from './seed-data';
+import { seedData, seedPortalDemo, ensureOwner, ensureStaff } from './seed-data';
 import { migrate } from './migrate';
 
 const connection = (database: string) => ({
@@ -53,8 +53,14 @@ export async function ensureDatabase(): Promise<void> {
   // Identity is independent of demo data: databases seeded before Phase 0.4
   // still need their owner employee, and the four apps need demo staff to log
   // in with (plan v5 Phase C/D/E).
-  await ensureOwner(client);
+    await ensureOwner(client);
   await ensureStaff(client);
+
+  // Portal demo dataset (plan v5 Phase B) — idempotent demo jobs/crew/timecards
+  // and cost lines that used to be client fixtures. Runs after ensureStaff so the
+  // demo employees exist to own the filings; unconditional so a non-empty DB still
+  // picks the rows up on the next bootstrap.
+  await seedPortalDemo(client);
 
   await client.end();
 }

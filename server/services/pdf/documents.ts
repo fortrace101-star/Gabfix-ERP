@@ -33,7 +33,8 @@ export type DocumentType =
   | 'assets'
   | 'manifest'
   | 'delivery-note'
-  | 'balance-sheet';
+  | 'balance-sheet'
+  | 'utility-slip';
 
 export type { RenderedDocument };
 
@@ -43,6 +44,60 @@ const money = (value: number | null | undefined) =>
 const dayText = (value: Date | string | null): string => (value ? String(value).slice(0, 10) : '-');
 
 // ── Loaders: one concern per type, all read-only ───────────────────────────
+
+/**
+ * Utility slip (plan v5 E5): the printable record for one captured meter
+ * reading/slip. Quarantined captures print with a "not yet posted" note;
+ * approved ones carry the ledger expense id they became.
+ */
+async function loadUtilitySlip(client: PoolClient, id: string): Promise<RenderedDocument | null> {
+  const { rows } = await client.query<{
+    id: string; captured_on: string; type: string; reference: string; reading: string | null;
+    amount: number; category_kind: string; captured_by: string; status: string;
+    expense_id: string | null; posted_on: string | null;
+  }>(
+    `SELECT id, captured_on::text AS captured_on, type, reference,
+            COALESCE(reading, '') AS reading, amount::float8 AS amount,
+            category_kind, captured_by, status,
+            expense_id, updated_at::date::text AS posted_on
+     FROM utility_captures WHERE id = $1`,
+    [id],
+  );
+  if (!rows.length) return null;
+  const slip = rows[0];
+  const input: DocumentInput = {
+    title: 'UTILITY CAPTURE SLIP',
+    reference: `UTC-${slip.id}`,
+    brand,
+    meta: [
+      { label: 'Utility', value: slip.type },
+      { label: 'Captured on', value: dayText(slip.captured_on) },
+      { label: 'Reference / meter', value: slip.reference },
+      { label: 'Reading', value: slip.reading || '-' },
+      { label: 'Cost category', value: slip.category_kind },
+      { label: 'Captured by', value: slip.captured_by || '-' },
+    ],
+    sections: [
+      {
+        heading: 'Capture detail',
+        columns: ['Item', 'Value'],
+        rows: [
+          { cells: ['Status', slip.status] },
+          { cells: ['Ledger expense', slip.expense_id ?? 'not posted yet'], amount: slip.amount },
+        ],
+      },
+    ],
+    totals: [{ label: 'Amount', value: money(slip.amount), emphasis: true }],
+    footerNote:
+      slip.status === 'Approved'
+        ? `Posted to the ledger${slip.posted_on ? ` on ${slip.posted_on}` : ''} as expense ${slip.expense_id ?? '-'}.`
+        : 'Quarantined: this slip is not yet in the ledger. Admin posts it from the Finance console.',
+  };
+  const buffer = await renderDocument(input);
+  const filename = `UTC-${slip.id}.pdf`;
+  mirror(filename, buffer);
+  return { buffer, filename };
+}
 
 async function loadInvoice(client: PoolClient, id: string): Promise<RenderedDocument | null> {
   const { rows } = await client.query<{
@@ -355,6 +410,7 @@ const LOADERS: Record<DocumentType, (client: PoolClient, id: string | null) => P
     const year = new Date().getFullYear();
     return loadBalanceSheet(client, from || `${year}-01-01`, to || kampalaToday());
   },
+  'utility-slip': (client, id) => loadUtilitySlip(client, id!),
 };
 
 /** Types that render without an entity id; the route rejects ids for them. */

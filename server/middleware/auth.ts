@@ -1,4 +1,4 @@
-import type { NextFunction, Request, Response } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { randomBytes } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 

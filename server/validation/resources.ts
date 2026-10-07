@@ -44,8 +44,18 @@ export type Resource = {
 /** Columns stored as JSONB must be stringified before reaching the pg driver. */
 export const JSONB_COLUMNS: ReadonlySet<string> = new Set(['equipment_usage']);
 
-/** Job status values used by the client (types.ts) and the seed data. */
-export const JOB_STATUSES = ['Scheduled', 'In Progress', 'Completed', 'Quoted', 'Cancelled'] as const;
+/** Job status values used by the client (types.ts) and the seed data.
+ *
+ * P1 lifecycle (cleaning-operations-workflow.md): a salesperson creates a
+ * `Proposed` order; only manager/customer-support may move it to `Confirmed`;
+ * `Follow-up` and `Closed` close the loop after feedback. `Inspection` is the
+ * priced-quote precursor already used by the checklist engine (025).
+ */
+export const JOB_STATUSES = [
+  'Proposed', 'Confirmed', 'Inspection', 'Quoted', 'Scheduled',
+  'In Progress', 'Follow-up', 'Completed', 'Invoiced', 'Paid',
+  'Closed', 'Cancelled',
+] as const;
 const jobStatus = z.enum(JOB_STATUSES);
 
 /** Job priority ladder (009_jobs_dates). Default 'Normal'. */

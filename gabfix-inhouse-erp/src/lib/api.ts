@@ -9,6 +9,14 @@ export type EmployeeSession = {
   app_scope: string[];
 };
 
+/** Result of validating an invite code on the public sign-up flow. */
+export type InviteValidation = {
+  valid: boolean;
+  role: string;
+  app_scope: string[];
+  expires_at: string;
+};
+
 type TokenPair = { accessToken: string; refreshToken: string; user: EmployeeSession };
 
 function headersWithAuth(): Record<string, string> {
@@ -25,7 +33,17 @@ const APP_ID = import.meta.env["VITE_APP_ID"] ?? "portal";
 
 async function parseError(response: Response): Promise<never> {
   const body = await response.text().catch(() => "");
-  throw new Error(`Gabfix API request failed (${response.status}): ${body}`);
+  // Prefer the server's structured { error } message so UIs show plain English.
+  let message = `Gabfix API request failed (${response.status}): ${body}`;
+  if (body) {
+    try {
+      const parsed = JSON.parse(body) as { error?: unknown };
+      if (typeof parsed?.error === "string" && parsed.error) message = parsed.error;
+    } catch {
+      /* not JSON — keep the raw body */
+    }
+  }
+  throw new Error(message);
 }
 
 export const portalApi = {
@@ -66,7 +84,7 @@ export const portalApi = {
   /**
    * Employee authentication against the Gabfix server API.
    * Canonical contract: POST /api/auth/login → {accessToken, refreshToken, user}.
-   * Staff accounts are admin-created — there is no sign-up.
+   * Staff accounts are created through the invite-code sign-up flow: an Admin issues a single-use code (see `signUp`), and the code's role + app scopes are the ceiling.
    */
   auth: {
     async login(identifier: string, password: string): Promise<EmployeeSession> {
@@ -79,6 +97,29 @@ export const portalApi = {
       return body.user;
     },
 
+    /** Validates an Admin-issued invite code for the public sign-up flow. */
+    validateInvite(code: string): Promise<InviteValidation> {
+      return portalApi.request<InviteValidation>(`/auth/invites/${encodeURIComponent(code)}/validate`);
+    },
+    /**
+     * Consumes a valid invite code to create an account with EXACTLY the role +
+     * app scopes granted by the code, then stores the issued token pair (same as
+     * `login`) so the new hire lands inside an authenticated session.
+     */
+    async signUp(payload: {
+      inviteCode: string;
+      name: string;
+      email: string;
+      password: string;
+    }): Promise<EmployeeSession> {
+      const body = await portalApi.request<TokenPair>("/auth/sign-up", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      localStorage.setItem(ACCESS_TOKEN_KEY, body.accessToken);
+      localStorage.setItem(REFRESH_TOKEN_KEY, body.refreshToken);
+      return body.user;
+    },
     /** Exchanges the stored refresh token for a fresh pair; null when expired. */
     async refresh(): Promise<EmployeeSession | null> {
       const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);

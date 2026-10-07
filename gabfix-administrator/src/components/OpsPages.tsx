@@ -235,9 +235,11 @@ export function SyncHealthPage({ onBack }: { onBack?: () => void }) {
   useWorkspaceSse(refresh);
   const [modal, setModal] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [decideError, setDecideError] = useState("");
 
   async function decide(id: string, status: "Approved" | "Rejected") {
     setSaving(true);
+    setDecideError("");
     try {
       await apiClient.request(`/store/purchase-requests/${id}`, {
         method: "PATCH",
@@ -245,6 +247,8 @@ export function SyncHealthPage({ onBack }: { onBack?: () => void }) {
       });
       setModal(null);
       refresh();
+    } catch (error: any) {
+      setDecideError(error.message ?? "Could not decide request");
     } finally {
       setSaving(false);
     }
@@ -335,7 +339,7 @@ export function SyncHealthPage({ onBack }: { onBack?: () => void }) {
                   Status: <strong>{r.status}</strong>
                 </p>
               </div>
-              {r.status === "Pending approval" && (
+                             {r.status === "Pending approval" && (
                 <div className="flex gap-2">
                   <Button className="flex-1" onClick={() => decide(r.id, "Approved")} disabled={saving}>
                     Approve
@@ -345,6 +349,9 @@ export function SyncHealthPage({ onBack }: { onBack?: () => void }) {
                   </Button>
                 </div>
               )}
+              {decideError && (
+              <p className="mt-2 text-sm text-destructive">{decideError}</p>
+            )}
             </div>
           );
         })()}

@@ -1,20 +1,13 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { X } from "lucide-react";
 import { DataTable, type Column } from "@/components/store/DataTable";
 import { KpiCard, KpiStrip } from "@/components/store/KpiCard";
 import { PageHeader } from "@/components/store/PageHeader";
 import { StatusBadge } from "@/components/store/StatusBadge";
 import { StoreButton } from "@/components/store/StoreButton";
-import {
-  compactCurrency,
-  currency,
-  lowStockItems,
-  materials,
-  movements,
-  stockStatus,
-  stockValuation,
-  type Material,
-} from "@/lib/store-data";
+import { MovementModal, PurchaseRequestModal } from "@/components/store/StoreModals";
+import { compactCurrency, currency, stockStatus, type Material } from "@/lib/store-data";
+import { useDerived, storeMutations } from "@/lib/workspace";
 import { useDocumentTitle } from "@/lib/use-document-title";
 
 function MaterialsPage() {
@@ -22,7 +15,27 @@ function MaterialsPage() {
     "Contract materials — Gabfix Store",
     "On-hand stock, issue-to-job movements, reorder levels and valuation for Gabfix contract materials.",
   );
+    const { ws, stockValuation, lowStockItems } = useDerived();
+  const { materials, movements } = ws;
   const [selected, setSelected] = useState<Material | null>(null);
+  const [movementOpen, setMovementOpen] = useState(false);
+  const [movementType, setMovementType] = useState<"Received" | "Issued" | "Adjustment" | "Return">("Received");
+  const [prOpen, setPrOpen] = useState(false);
+
+  if (ws.loading) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center" role="status" aria-label="Loading store data">
+        <div className="size-8 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-primary" />
+      </div>
+    );
+  }
+  if (ws.error) {
+    return (
+      <div className="rounded-xl border border-border bg-surface p-6 text-sm text-muted-foreground">
+        Could not load store data: {ws.error}
+      </div>
+    );
+  }
 
   const columns: Column<Material>[] = [
     {
@@ -88,9 +101,9 @@ function MaterialsPage() {
         description="Receive goods, issue to jobs and adjust movements. Purchase orders and valuations post through the Admin Console."
         actions={
           <>
-            <StoreButton variant="outline">Goods received</StoreButton>
-            <StoreButton variant="gold">Restock request</StoreButton>
-            <StoreButton variant="primary">Issue to job</StoreButton>
+                        <StoreButton variant="outline" onClick={() => { setMovementType("Received"); setMovementOpen(true); }}>Goods received</StoreButton>
+            <StoreButton variant="gold" onClick={() => setPrOpen(true)}>Restock request</StoreButton>
+            <StoreButton variant="primary" onClick={() => { setMovementType("Issued"); setMovementOpen(true); }}>Issue to job</StoreButton>
           </>
         }
       />
@@ -199,16 +212,37 @@ function MaterialsPage() {
             </div>
 
             <div className="flex gap-2 border-t border-border px-5 py-4">
-              <StoreButton variant="primary" className="flex-1">
+                            <StoreButton variant="primary" className="flex-1" onClick={() => { setMovementType("Issued"); setMovementOpen(true); }}>
                 Issue to job
               </StoreButton>
-              <StoreButton variant="outline" className="flex-1">
+              <StoreButton variant="outline" className="flex-1" onClick={() => { setMovementType("Adjustment"); setMovementOpen(true); }}>
                 Adjust stock
               </StoreButton>
             </div>
           </aside>
         </>
-      ) : null}
+            ) : null}
+
+      <MovementModal
+        open={movementOpen}
+        onClose={() => setMovementOpen(false)}
+        items={materials.map((m) => ({ id: m.id, name: m.name, code: m.code }))}
+        defaultType={movementType}
+        onSubmit={async (input) => {
+          await storeMutations.createMovement(input);
+          setMovementOpen(false);
+        }}
+      />
+
+      <PurchaseRequestModal
+        open={prOpen}
+        onClose={() => setPrOpen(false)}
+        items={materials.map((m) => ({ id: m.id, name: m.name, code: m.code, unitCost: m.unitCost }))}
+        onSubmit={async (input) => {
+          await storeMutations.createPurchaseRequest({ ...input, supplierId: null });
+          setPrOpen(false);
+        }}
+      />
     </>
   );
 }
@@ -223,3 +257,4 @@ function Detail({ label, value }: { label: string; value: string }) {
 }
 
 export default MaterialsPage;
+

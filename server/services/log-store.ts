@@ -19,7 +19,9 @@ export interface RequestLog {
   duration: number; // ms
   ip: string;
   userAgent: string;
-  userId?: string;
+    userId?: string;
+  /** Raw request body, captured for diagnostic 4xx events (parse failures). */
+  body?: string;
 }
 
 const MAX_ENTRIES = 1000;

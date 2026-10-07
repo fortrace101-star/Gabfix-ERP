@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { storeApi } from "@/lib/api";
 import {
   stockStatus,
@@ -210,7 +210,66 @@ export function useDerived() {
   const quarantinedSpend = ws.utilities
     .filter((u) => u.status === "Quarantined")
     .reduce((sum, u) => sum + u.amount, 0);
-  return { ws, stockValuation, lowStockItems, toolsOut, quarantinedSpend };
+
+      // Weekly throughput: group movements by ISO week, count received vs issued.
+  const throughput = useMemo(() => {
+    const getWeek = (d: Date): number => {
+      const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+      const dayNum = (date.getUTCDay() + 6) % 7;
+      date.setUTCDate(date.getUTCDate() - dayNum + 3);
+      const firstWeek = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+      const week = 1 + Math.round(((date.getTime() - firstWeek.getTime()) / 86400000 - 3 + 6) / 7);
+      return week;
+    };
+    const byWeek = new Map<string, { issued: number; received: number }>();
+    for (const mv of ws.movements) {
+      try {
+        const d = new Date(mv.date);
+        const week = `W${String(getWeek(d)).padStart(2, "0")}`;
+        const slot = byWeek.get(week) ?? { issued: 0, received: 0 };
+        if (mv.type === "Issued" || mv.type === "Adjustment" || mv.type === "Return") {
+          slot.issued += Math.abs(mv.qty);
+        }
+        if (mv.type === "Received") {
+          slot.received += mv.qty;
+        }
+        byWeek.set(week, slot);
+      } catch {
+        /* skip rows without a parseable date */
+      }
+    }
+    return Array.from(byWeek.entries())
+      .map(([week, counts]) => ({ week, issued: counts.issued, received: counts.received }))
+      .sort((a, b) => a.week.localeCompare(b.week));
+  }, [ws.movements]);
+
+  // Cost per job: materials issued + utilities recharged per job.
+  const costPerJob = useMemo(() => {
+    const byJob = new Map<string, { materials: number; utilities: number }>();
+    for (const mv of ws.movements) {
+      if ((mv.type === "Issued" || mv.type === "Adjustment" || mv.type === "Return") && mv.qty < 0) {
+        if (!mv.job) continue;
+        const jobKey = mv.job.split(" · ")[0] ?? mv.job;
+        const slot = byJob.get(jobKey) ?? { materials: 0, utilities: 0 };
+        slot.materials += Math.abs(mv.qty) * (ws.materials.find((m) => m.code === mv.materialCode)?.unitCost ?? 0);
+        byJob.set(jobKey, slot);
+      }
+    }
+    for (const u of ws.utilities) {
+      if (u.category === "1 · Direct job cost" && u.status === "Approved") {
+        // Utilities don't always map to a specific job; group under the reference.
+        const jobKey = u.reference.split(" · ")[0] ?? u.reference;
+        const slot = byJob.get(jobKey) ?? { materials: 0, utilities: 0 };
+        slot.utilities += u.amount;
+        byJob.set(jobKey, slot);
+      }
+    }
+    return Array.from(byJob.entries())
+      .map(([job, costs]) => ({ job, materials: +(costs.materials / 1_000_000).toFixed(1), utilities: +(costs.utilities / 1_000_000).toFixed(1) }))
+      .sort((a, b) => b.materials + b.utilities - (a.materials + a.utilities));
+  }, [ws.movements, ws.utilities, ws.materials]);
+
+  return { ws, stockValuation, lowStockItems, toolsOut, quarantinedSpend, throughput, costPerJob };
 }
 
 /** ── Phase E: mutations + cross-app SSE refresh ──────────────────────────── */

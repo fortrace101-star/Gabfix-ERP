@@ -1,7 +1,6 @@
-import { useState } from "react";
+﻿import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
-  Bell,
   ChevronLeft,
   Fuel,
   LayoutDashboard,
@@ -14,44 +13,51 @@ import {
   FileBarChart,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { lowStockItems, purchaseRequests, utilityEntries } from "@/lib/store-data";
-
-const groups = [
-  {
-    label: "Store",
-    items: [
-      { to: "/", label: "Overview", icon: LayoutDashboard, badge: null },
-      {
-        to: "/materials",
-        label: "Contract materials",
-        icon: Package,
-        badge: lowStockItems.length,
-      },
-      { to: "/tools", label: "Tools & equipment", icon: Wrench, badge: null },
-      {
-        to: "/utilities",
-        label: "Utilities & costs",
-        icon: Fuel,
-        badge: utilityEntries.filter((u) => u.status === "Quarantined").length,
-      },
-    ],
-  },
-  {
-    label: "Supply chain",
-    items: [
-      {
-        to: "/suppliers",
-        label: "Suppliers & requests",
-        icon: Truck,
-        badge: purchaseRequests.filter((p) => p.status === "Pending approval").length,
-      },
-      { to: "/reports", label: "Reports", icon: FileBarChart, badge: null },
-    ],
-  },
-] as const;
+import { useDerived } from "@/lib/workspace";
+import { StoreBell } from "@/components/store/StoreBell";
+import { useSession } from "@/lib/session";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
+  const { ws, lowStockItems } = useDerived();
+  const session = useSession();
+
+  const utilityQuarantineCount = ws.utilities.filter((u) => u.status === "Quarantined").length;
+  const purchasePendingCount = ws.purchaseRequests.filter((p) => p.status === "Pending approval").length;
+
+  const groups = [
+    {
+      label: "Store",
+      items: [
+        { to: "/", label: "Overview", icon: LayoutDashboard, badge: null },
+        {
+          to: "/materials",
+          label: "Contract materials",
+          icon: Package,
+          badge: lowStockItems.length,
+        },
+        { to: "/tools", label: "Tools & equipment", icon: Wrench, badge: null },
+        {
+          to: "/utilities",
+          label: "Utilities & costs",
+          icon: Fuel,
+          badge: utilityQuarantineCount,
+        },
+      ],
+    },
+    {
+      label: "Supply chain",
+      items: [
+        {
+          to: "/suppliers",
+          label: "Suppliers & requests",
+          icon: Truck,
+          badge: purchasePendingCount,
+        },
+        { to: "/reports", label: "Reports", icon: FileBarChart, badge: null },
+      ],
+    },
+  ] as const;
 
   return (
     <div className="flex min-h-screen w-full bg-background">
@@ -150,17 +156,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="size-1.5 rounded-full bg-primary" />
               Store PC online
             </span>
-            <span className="relative text-muted-foreground">
-              <Bell className="size-5" strokeWidth={1.75} />
-              <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-gold" />
-            </span>
+            <StoreBell />
             <div className="flex items-center gap-2">
               <span className="grid size-8 place-items-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
                 GA
               </span>
               <div className="hidden leading-tight sm:block">
-                <p className="text-sm font-medium text-foreground">Grace Atim</p>
-                <p className="text-[11px] text-muted-foreground">Store keeper</p>
+                <p className="text-sm font-medium text-foreground">{session?.name ?? "—"}</p>
+                <p className="text-[11px] text-muted-foreground">{session?.role ?? "Store keeper"}</p>
               </div>
             </div>
           </div>

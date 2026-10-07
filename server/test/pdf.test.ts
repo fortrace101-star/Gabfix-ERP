@@ -97,6 +97,15 @@ if (dbUp) {
         [`pdftest-pay-${run}`, `PAY-PDF-${run}`, customerId, invoiceId],
       );
 
+      // Utility capture for the utility-slip loader (plan v5 E5).
+      // utility_captures.id has no default — generate the same shape the route does.
+      const captureId = `uc${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      await tx.query(
+        `INSERT INTO utility_captures (id, captured_on, type, reference, reading, amount, category_kind, captured_by, status)
+         VALUES ($1, '2026-09-04', 'Power', 'meter 12', '1402 kWh', 95000, 'operations', 'pdf-test', 'Quarantined')`,
+        [captureId],
+      );
+
       for (const type of DOCUMENT_TYPES) {
         const id =
           type === 'invoice' ? invoiceId
@@ -107,6 +116,7 @@ if (dbUp) {
           : type === 'statement' ? customerId
           : type === 'manifest' ? '2026-09-03'
           : type === 'pl' ? '2026-01-01/2026-12-31'
+          : type === 'utility-slip' ? captureId
           : null;
         const rendered = await renderTypedDocument(type, id, tx);
         assert.ok(rendered, `${type} renders`);

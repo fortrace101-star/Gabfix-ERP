@@ -5,6 +5,7 @@ import { pool } from '../db';
 import { fail } from '../lib/http';
 import { parseBody } from '../validation/common';
 import { dispatchEvent } from '../services/notifications';
+import { seedStageChecklist } from '../services/job-checklist';
 import { publish } from '../services/realtime';
 
 /**
@@ -75,6 +76,10 @@ jobStatusRouter.patch('/:id/status', async (req: Request, res: Response) => {
       );
     }
 
+    // Every stage a job enters brings its own checklist (migration 025). Seeding
+    // is skipped when that stage already has rows, so crew edits are preserved.
+    await seedStageChecklist(client, job.id, input.status, req.user?.id ?? null);
+
     await client.query('COMMIT');
     res.json({ id: job.id, status: input.status, at: now.toISOString() });
 
@@ -82,6 +87,19 @@ jobStatusRouter.patch('/:id/status', async (req: Request, res: Response) => {
       const c = await pool.connect();
       try {
         await dispatchEvent(c, { type: 'job.completed', entityType: 'jobs', entityId: job.id });
+        // CSR feedback outreach (plan): seed the 1-day-later check-in for any
+        // completed job that has no follow-up row yet; the CSR pane consumes
+        // it (cadence re-queues every 2 days until feedback arrives).
+        await c.query(
+          `INSERT INTO follow_ups (type, owner_role, customer_id, job_id, due_at,
+                                   follow_up_after_days, notes)
+           SELECT 'feedback_outreach', 'csr', $1, $2, now() + INTERVAL '1 day', 2, $3
+           WHERE $1 IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM feedback WHERE job_id = $2)
+             AND NOT EXISTS (SELECT 1 FROM follow_ups
+                             WHERE job_id = $2 AND type = 'feedback_outreach')`,
+          [job.customer_id, job.id, `Feedback check-in for ${job.number}`],
+        );
       } finally {
         c.release();
       }
